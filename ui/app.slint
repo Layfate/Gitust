@@ -4,13 +4,13 @@ import { AppState, ChangeRow, DiffLine, CommitItem, BranchItem, RepoItem, GhRepo
 import { VDivider } from "widgets.slint";
 import { Sidebar, RepoHeader, TabsBar, StatusBar, TrustBanner } from "chrome.slint";
 import { ChangesView, HistoryView, BranchesView, GitHubView, Welcome } from "views.slint";
-import { CloneDialog, NewBranchDialog, ConfirmDialog, ErrorDialog, SettingsDialog, CommandPalette, PullDivergedDialog } from "dialogs.slint";
+import { CloneDialog, NewBranchDialog, ConfirmDialog, ErrorDialog, SettingsDialog, CommandPalette, PullDivergedDialog, AboutDialog } from "dialogs.slint";
 
 export { AppState, T, ChangeRow, DiffLine, CommitItem, BranchItem, RepoItem, GhRepoItem, GhItem, PaletteItem }
 
 export component MainWindow inherits Window {
     title: AppState.has-repo ? AppState.repo-name + " · " + AppState.branch + " — Gitust" : "Gitust";
-    icon: @image-url("icons/logo-64.png");
+    icon: @image-url("icons/logo.svg");
     preferred-width: 1280px;
     preferred-height: 800px;
     min-width: 940px;
@@ -207,6 +207,11 @@ export component MainWindow inherits Window {
                 activated => { AppState.show-dialog("settings"); }
             }
             MenuItem {
+                title: "About Gitust";
+                activated => { AppState.show-dialog("about"); }
+            }
+            MenuSeparator { }
+            MenuItem {
                 title: "Show log file";
                 activated => { AppState.open-log(); }
             }
@@ -278,6 +283,12 @@ export component MainWindow inherits Window {
         height: root.height;
     }
     if AppState.dialog == "pull-diverged": PullDivergedDialog {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+    }
+    if AppState.dialog == "about": AboutDialog {
         x: 0;
         y: 0;
         width: root.width;

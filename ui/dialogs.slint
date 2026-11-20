@@ -1,4 +1,4 @@
-import { LineEdit, TextEdit, ListView } from "std-widgets.slint";
+import { LineEdit, TextEdit, ListView, AboutSlint } from "std-widgets.slint";
 import { T } from "theme.slint";
 import { AppState, PaletteItem } from "state.slint";
 import { FlatButton, IconButton, HDivider, SectionLabel, Spacer } from "widgets.slint";
@@ -496,6 +496,67 @@ export component PullDivergedDialog inherits Modal {
             text: "Merge";
             enabled: !AppState.busy;
             clicked => { AppState.pull-with(1); }
+        }
+    }
+}
+
+export component AboutDialog inherits Modal {
+    title: "About Gitust";
+    card-width: 460px;
+    close => { AppState.dialog = ""; }
+
+    HorizontalLayout {
+        spacing: 14px;
+        Image {
+            source: @image-url("icons/logo.svg");
+            width: 56px;
+            height: 56px;
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            Text {
+                text: "Gitust " + AppState.version;
+                font-size: T.fs-lg;
+                font-weight: 700;
+                color: T.fg;
+            }
+            Text {
+                text: "A tiny, native Git & GitHub client written in Rust.";
+                color: T.muted;
+                wrap: word-wrap;
+            }
+        }
+    }
+    Text {
+        text: "Free and open source under the MIT or Apache-2.0 license, at your option.";
+        color: T.muted;
+        font-size: T.fs-sm;
+        wrap: word-wrap;
+    }
+    HorizontalLayout {
+        alignment: start;
+        FlatButton {
+            text: "github.com/Layfate/Gitust";
+            icon: @image-url("icons/external.svg");
+            has-icon: true;
+            clicked => { AppState.open-url("https://github.com/Layfate/Gitust"); }
+        }
+    }
+    HDivider { }
+    // Required attribution for Slint's royalty-free license.
+    HorizontalLayout {
+        alignment: center;
+        AboutSlint {
+            max-width: 260px;
+        }
+    }
+    HorizontalLayout {
+        alignment: end;
+        FlatButton {
+            primary: true;
+            text: "Close";
+            clicked => { AppState.dialog = ""; }
         }
     }
 }

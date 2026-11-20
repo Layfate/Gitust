@@ -5,6 +5,8 @@
 <p align="center"><b>A tiny, performant, 100% native Git &amp; GitHub desktop client, written in Rust.</b><br>
 No Electron, no webview, no Node runtime: one small executable.</p>
 
+<p align="center"><a href="https://slint.dev"><img src="https://raw.githubusercontent.com/slint-ui/slint/master/logo/MadeWithSlint-logo-whitebg.png" alt="Made with Slint" height="36"></a></p>
+
 <p align="center">
   <img src="docs/screenshots/changes.png" width="49%" alt="Changes view with a diff">
   <img src="docs/screenshots/history.png" width="49%" alt="History view">
@@ -171,4 +173,15 @@ Design rules:
 
 ## License
 
-Not chosen yet. Note that Slint is available under GPLv3, a royalty-free license for desktop apps (requires attribution), or a commercial license, so pick a project license that is compatible with the Slint option you use.
+Gitust is licensed under either of
+
+- [MIT license](LICENSE-MIT)
+- [Apache License, Version 2.0](LICENSE-APACHE)
+
+at your option. Unless you explicitly state otherwise, any contribution you submit for inclusion in Gitust is dual licensed as above, without any additional terms or conditions.
+
+The UI is built with [Slint](https://slint.dev), used under its [royalty-free license](https://slint.dev/terms-and-conditions#royalty-free), which asks for attribution: Gitust shows Slint's About panel under **Help → About Gitust**, and the badge below.
+
+<a href="https://slint.dev"><img src="https://raw.githubusercontent.com/slint-ui/slint/master/logo/MadeWithSlint-logo-whitebg.png" alt="Made with Slint" height="48"></a>
+
+The logo source is [`ui/icons/logo.svg`](ui/icons/logo.svg) (plus [`assets/logo-small.svg`](assets/logo-small.svg) for 16–24 px icons); `cargo run --example render_icons` regenerates the PNG and `.ico`.

@@ -1,0 +1,13 @@
+<!-- Simplified logo for 16–24 px icons (taskbar, Explorer lists). Same design
+     as ui/icons/logo.svg with a bigger disc, thicker strokes and solid nodes. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <rect x="4" y="4" width="248" height="248" rx="56" fill="#e8611f"/>
+  <circle cx="128" cy="128" r="104" fill="#14181f"/>
+  <g fill="none" stroke="#ffffff" stroke-width="26" stroke-linecap="round">
+    <path d="M100 82V174"/>
+    <path d="M160 100C160 146 100 132 100 160"/>
+  </g>
+  <circle cx="100" cy="78" r="24" fill="#ffffff"/>
+  <circle cx="100" cy="178" r="24" fill="#ffffff"/>
+  <circle cx="160" cy="92" r="25" fill="#ff8a3d" stroke="#ffffff" stroke-width="12"/>
+</svg>

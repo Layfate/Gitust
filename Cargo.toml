@@ -6,6 +6,8 @@ description = "A tiny, performant, 100% native Git & GitHub desktop client"
 keywords = ["git", "github", "desktop", "slint", "gui"]
 categories = ["development-tools", "gui"]
 rust-version = "1.88"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Layfate/Gitust"
 
 [dependencies]
 anyhow = "1.0.104"
@@ -33,6 +35,8 @@ winresource = "0.1.34"
 
 [dev-dependencies]
 tempfile = "3"
+# Only for `cargo run --example render_icons` (already in the tree via Slint).
+resvg = { version = "0.49.0", default-features = false }
 
 [profile.release]
 # "s" is ~20% smaller than "3" with no measurable startup difference (scripts/bench.ps1).
