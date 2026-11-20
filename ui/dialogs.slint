@@ -580,3 +580,119 @@ export component AboutDialog inherits Modal {
         }
     }
 }
+
+export component InputDialog inherits Modal {
+    title: AppState.input-title;
+    close => { AppState.dialog = ""; }
+    init => { field.focus(); }
+
+    FieldLabel { text: AppState.input-label; }
+    field := LineEdit {
+        text <=> AppState.input-value;
+        accepted => { AppState.input-accept(); }
+    }
+    if AppState.input-has-message: FieldLabel { text: "Message (optional: makes an annotated tag)"; }
+    if AppState.input-has-message: TextEdit {
+        text <=> AppState.input-message;
+        height: 72px;
+        wrap: word-wrap;
+    }
+    if AppState.input-hint != "": Text {
+        text: AppState.input-hint;
+        color: T.subtle;
+        font-size: T.fs-sm;
+        wrap: word-wrap;
+    }
+    HorizontalLayout {
+        spacing: 8px;
+        alignment: end;
+        FlatButton {
+            text: "Cancel";
+            clicked => { AppState.dialog = ""; }
+        }
+        FlatButton {
+            primary: true;
+            text: AppState.input-button;
+            enabled: AppState.input-value != "" && !AppState.busy;
+            clicked => { AppState.input-accept(); }
+        }
+    }
+}
+
+export component StashDialog inherits Modal {
+    title: "Stashes";
+    card-width: 560px;
+    close => { AppState.dialog = ""; }
+
+    if AppState.stashes.length == 0: Text {
+        text: "Nothing stashed.";
+        color: T.muted;
+    }
+    if AppState.stashes.length > 0: ListView {
+        height: min(AppState.stashes.length * 44px, 308px);
+        for st in AppState.stashes: Rectangle {
+            height: 44px;
+            HorizontalLayout {
+                spacing: 6px;
+                padding-right: 4px;
+                VerticalLayout {
+                    alignment: center;
+                    horizontal-stretch: 1;
+                    Text {
+                        text: st.message;
+                        color: T.fg;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: "stash@{" + st.index + "}";
+                        color: T.subtle;
+                        font-family: T.mono;
+                        font-size: T.fs-xs;
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    FlatButton {
+                        height: 26px;
+                        font-size: T.fs-sm;
+                        text: "Apply";
+                        enabled: !AppState.busy;
+                        clicked => { AppState.stash-apply(st.index); }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    FlatButton {
+                        height: 26px;
+                        font-size: T.fs-sm;
+                        text: "Pop";
+                        enabled: !AppState.busy;
+                        clicked => { AppState.stash-pop-at(st.index); }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    IconButton {
+                        icon: @image-url("icons/close.svg");
+                        label: "Drop this stash";
+                        icon-size: 12px;
+                        clicked => { AppState.stash-drop(st.index); }
+                    }
+                }
+            }
+        }
+    }
+    Text {
+        text: "Apply keeps the stash; Pop applies and removes it.";
+        color: T.subtle;
+        font-size: T.fs-xs;
+    }
+    HorizontalLayout {
+        alignment: end;
+        FlatButton {
+            primary: true;
+            text: "Done";
+            clicked => { AppState.dialog = ""; }
+        }
+    }
+}

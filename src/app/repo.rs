@@ -213,6 +213,8 @@ impl App {
             st.set_repo_state(sum.state.clone().into());
             st.set_github_slug(sum.github_slug.clone().unwrap_or_default().into());
             st.set_stash_count(sum.stash_count as i32);
+            st.set_head_id(sum.head.clone().unwrap_or_default().into());
+            st.set_head_undoable(sum.head_has_parent);
             st.set_staged_count(sum.staged.len() as i32);
             st.set_unstaged_count(sum.unstaged.len() as i32);
             st.set_conflicted_count(sum.conflicted as i32);

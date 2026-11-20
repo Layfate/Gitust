@@ -608,8 +608,27 @@ export component ChangesView inherits HorizontalLayout {
                 Banner {
                     tone: AppState.conflicted-count > 0 ? T.red : T.yellow;
                     text: AppState.conflicted-count > 0
-                        ? AppState.conflicted-count + " conflicted file(s). Pick a version with Use mine / Use theirs, or edit out the conflict markers and mark the file resolved. Then commit."
-                        : AppState.repo-state + " in progress. Commit to finish, or abort it from the terminal.";
+                        ? AppState.conflicted-count + " conflicted file(s). Pick a version with Use mine / Use theirs, or edit out the conflict markers and mark the file resolved."
+                        : AppState.repo-state == "Merging"
+                            ? "Merge in progress. Commit to finish it, or abort to go back."
+                            : AppState.repo-state + " in progress. Continue once conflicts are resolved, or abort to go back.";
+                    if AppState.repo-state != "": VerticalLayout {
+                        alignment: center;
+                        spacing: 6px;
+                        if AppState.repo-state != "Merging" && AppState.conflicted-count == 0: FlatButton {
+                            primary: true;
+                            height: 26px;
+                            font-size: T.fs-sm;
+                            text: "Continue";
+                            clicked => { AppState.continue-operation(); }
+                        }
+                        FlatButton {
+                            height: 26px;
+                            font-size: T.fs-sm;
+                            text: "Abort…";
+                            clicked => { AppState.abort-operation(); }
+                        }
+                    }
                 }
             }
             if AppState.staged-count + AppState.unstaged-count == 0: EmptyState {
@@ -723,10 +742,26 @@ component CommitRow inherits Rectangle {
                 enabled: AppState.github-slug != "";
                 activated => { AppState.open-commit-on-github(root.item.id); }
             }
+            MenuSeparator { }
+            MenuItem {
+                title: "Cherry-pick onto " + AppState.branch + "…";
+                enabled: !root.item.merge && root.item.id != AppState.head-id && !AppState.detached;
+                activated => { AppState.cherry-pick(root.item.id); }
+            }
             MenuItem {
                 title: "Revert this commit…";
                 enabled: !root.item.merge;
                 activated => { AppState.revert-commit(root.item.id); }
+            }
+            MenuItem {
+                title: "Create tag…";
+                activated => { AppState.create-tag(root.item.id); }
+            }
+            MenuSeparator { }
+            MenuItem {
+                title: "Undo this commit…";
+                enabled: root.item.id == AppState.head-id && AppState.head-undoable;
+                activated => { AppState.undo-commit(); }
             }
         }
         ta := TouchArea {
@@ -882,16 +917,32 @@ component BranchRow inherits Rectangle {
                 enabled: !root.item.is-head;
                 activated => { AppState.merge-branch(root.item.name); }
             }
+            MenuItem {
+                title: "Rename…";
+                enabled: !root.item.is-remote && !root.item.is-tag;
+                activated => { AppState.rename-branch(root.item.name); }
+            }
+            MenuItem {
+                title: "Push tag to " + AppState.remote;
+                enabled: root.item.is-tag && AppState.remote != "";
+                activated => { AppState.push-tag(root.item.name); }
+            }
             MenuSeparator { }
             MenuItem {
-                title: "Delete branch…";
-                enabled: !root.item.is-head && !root.item.is-remote;
-                activated => { AppState.delete-branch(root.item.name); }
+                title: root.item.is-tag ? "Delete tag…" : "Delete branch…";
+                enabled: root.item.is-tag || (!root.item.is-head && !root.item.is-remote);
+                activated => {
+                    if root.item.is-tag {
+                        AppState.delete-tag(root.item.name);
+                    } else {
+                        AppState.delete-branch(root.item.name);
+                    }
+                }
             }
         }
         ta := TouchArea {
             double-clicked => {
-                if !root.item.is-head {
+                if !root.item.is-head && !root.item.is-tag {
                     AppState.checkout(root.item.name, root.item.is-remote);
                 }
             }
@@ -902,7 +953,7 @@ component BranchRow inherits Rectangle {
                 VerticalLayout {
                     alignment: center;
                     Image {
-                        source: root.item.is-remote ? @image-url("icons/cloud.svg") : @image-url("icons/branch.svg");
+                        source: root.item.is-tag ? @image-url("icons/tag.svg") : root.item.is-remote ? @image-url("icons/cloud.svg") : @image-url("icons/branch.svg");
                         width: 16px;
                         height: 16px;
                         colorize: root.item.is-head ? T.brand : T.muted;
@@ -935,13 +986,13 @@ component BranchRow inherits Rectangle {
                         Spacer { }
                     }
                     Text {
-                        text: root.item.summary + (root.item.when != "" ? "  · " + root.item.when : "") + (root.item.upstream != "" ? "  · tracks " + root.item.upstream : "");
+                        text: root.item.summary + (root.item.when != "" ? "  · " + root.item.when : "") + (root.item.upstream == "" ? "" : root.item.is-tag ? "  · " + root.item.upstream : "  · tracks " + root.item.upstream);
                         color: T.muted;
                         font-size: T.fs-sm;
                         overflow: elide;
                     }
                 }
-                if !root.item.is-head && ta.has-hover: VerticalLayout {
+                if !root.item.is-head && !root.item.is-tag && ta.has-hover: VerticalLayout {
                     alignment: center;
                     FlatButton {
                         height: 26px;
@@ -983,12 +1034,13 @@ export component BranchesView inherits VerticalLayout {
     if AppState.branches.length > 0: ListView {
         vertical-stretch: 1;
         for b[i] in AppState.branches: VerticalLayout {
-            property <bool> section: i == 0 || (b.is-remote && !AppState.branches[i - 1].is-remote);
+            property <int> kind: b.is-tag ? 2 : b.is-remote ? 1 : 0;
+            property <bool> section: i == 0 || kind != (AppState.branches[i - 1].is-tag ? 2 : AppState.branches[i - 1].is-remote ? 1 : 0);
             if section: HorizontalLayout {
                 padding-left: 12px;
                 padding-top: i == 0 ? 2px : 14px;
                 padding-bottom: 6px;
-                SectionLabel { text: b.is-remote ? "REMOTE BRANCHES" : "LOCAL BRANCHES"; }
+                SectionLabel { text: kind == 2 ? "TAGS" : kind == 1 ? "REMOTE BRANCHES" : "LOCAL BRANCHES"; }
             }
             BranchRow {
                 height: 50px;

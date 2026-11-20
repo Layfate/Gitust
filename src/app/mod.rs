@@ -132,6 +132,11 @@ enum Pending {
     Trust,
     TakeSide { path: String, mine: bool },
     DiscardLines { key: String, rows: Vec<usize> },
+    Abort(String),
+    CherryPick(String),
+    UndoCommit,
+    DeleteTag(String),
+    DropStash(usize),
 }
 
 fn select_key(change: &FileChange, fingerprint: u64) -> String {
@@ -169,6 +174,9 @@ struct State {
     history_gen: u64,
     history_query: String,
     branches: Vec<git::BranchInfo>,
+    tags: Vec<git::TagInfo>,
+    /// What the shared name dialog is for.
+    input: Option<workflow::Input>,
     branch_query: String,
     watcher: Option<RepoWatcher>,
     /// Config/hooks that run programs, until the user trusts this repository.
@@ -615,6 +623,7 @@ impl App {
             }
         });
         on!(on_open_terminal, |app| app.open_terminal());
+        self.bind_workflow(&st);
         on!(on_open_log, |_app| {
             if let Some(p) = crate::log::path() {
                 reveal(p);
@@ -797,6 +806,13 @@ impl App {
                 self.simple_op("Reverting", vec!["revert", "--no-edit", &id], "Commit reverted")
             }
             Some(Pending::Amend) => self.commit(true),
+            Some(
+                p @ (Pending::Abort(_)
+                | Pending::CherryPick(_)
+                | Pending::UndoCommit
+                | Pending::DeleteTag(_)
+                | Pending::DropStash(_)),
+            ) => self.workflow_confirmed(p),
             Some(Pending::Trust) => {
                 let (root, list) = {
                     let mut s = self.st();
@@ -862,6 +878,7 @@ mod hub;
 mod palette;
 mod remote;
 mod repo;
+mod workflow;
 
 #[allow(unused_imports)]
 use self::{changes::*, history::*, palette::*, remote::*, repo::*};

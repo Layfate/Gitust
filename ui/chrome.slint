@@ -296,9 +296,13 @@ export component RepoHeader inherits Rectangle {
                         vertical-alignment: center;
                         overflow: elide;
                     }
-                    if AppState.stash-count > 0: VerticalLayout {
-                        alignment: center;
-                        Chip { text: AppState.stash-count + " stashed"; tone: T.purple; }
+                    if AppState.stash-count > 0: TouchArea {
+                        mouse-cursor: MouseCursor.pointer;
+                        clicked => { AppState.show-stashes(); }
+                        VerticalLayout {
+                            alignment: center;
+                            Chip { text: AppState.stash-count + " stashed"; tone: T.purple; }
+                        }
                     }
                 }
             }

@@ -1,12 +1,12 @@
 import { Palette } from "std-widgets.slint";
 import { T } from "theme.slint";
-import { AppState, ChangeRow, DiffLine, Seg, GraphPath, CommitItem, BranchItem, RepoItem, GhRepoItem, GhItem, PaletteItem } from "state.slint";
+import { AppState, ChangeRow, DiffLine, Seg, GraphPath, StashItem, CommitItem, BranchItem, RepoItem, GhRepoItem, GhItem, PaletteItem } from "state.slint";
 import { VDivider } from "widgets.slint";
 import { Sidebar, RepoHeader, TabsBar, StatusBar, TrustBanner } from "chrome.slint";
 import { ChangesView, HistoryView, BranchesView, GitHubView, Welcome } from "views.slint";
-import { CloneDialog, NewBranchDialog, ConfirmDialog, ErrorDialog, SettingsDialog, CommandPalette, PullDivergedDialog, AboutDialog } from "dialogs.slint";
+import { CloneDialog, NewBranchDialog, ConfirmDialog, ErrorDialog, SettingsDialog, CommandPalette, PullDivergedDialog, AboutDialog, InputDialog, StashDialog } from "dialogs.slint";
 
-export { AppState, T, ChangeRow, DiffLine, Seg, GraphPath, CommitItem, BranchItem, RepoItem, GhRepoItem, GhItem, PaletteItem }
+export { AppState, T, ChangeRow, DiffLine, Seg, GraphPath, StashItem, CommitItem, BranchItem, RepoItem, GhRepoItem, GhItem, PaletteItem }
 
 export component MainWindow inherits Window {
     title: AppState.has-repo ? AppState.repo-name + " · " + AppState.branch + " — Gitust" : "Gitust";
@@ -108,6 +108,11 @@ export component MainWindow inherits Window {
                 shortcut: @keys(Control + Shift + S);
                 enabled: AppState.has-repo;
                 activated => { AppState.stash(); }
+            }
+            MenuItem {
+                title: "Stashes…";
+                enabled: AppState.has-repo;
+                activated => { AppState.show-stashes(); }
             }
             MenuItem {
                 title: "Pop latest stash";
@@ -283,6 +288,18 @@ export component MainWindow inherits Window {
         height: root.height;
     }
     if AppState.dialog == "pull-diverged": PullDivergedDialog {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+    }
+    if AppState.dialog == "input": InputDialog {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+    }
+    if AppState.dialog == "stashes": StashDialog {
         x: 0;
         y: 0;
         width: root.width;

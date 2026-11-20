@@ -58,11 +58,18 @@ export struct BranchItem {
     name: string,
     is-head: bool,
     is-remote: bool,
+    // Tags are listed with branches; `upstream` then holds the tagged commit.
+    is-tag: bool,
     upstream: string,
     ahead: int,
     behind: int,
     when: string,
     summary: string,
+}
+
+export struct StashItem {
+    index: int,
+    message: string,
 }
 
 export struct RepoItem {
@@ -119,6 +126,10 @@ export global AppState {
     in-out property <string> repo-state;
     in-out property <string> github-slug;
     in-out property <int> stash-count;
+    in-out property <[StashItem]> stashes;
+    // HEAD commit, and whether it can be undone (it has a parent).
+    in-out property <string> head-id;
+    in-out property <bool> head-undoable;
     in-out property <string> last-fetched;
     in-out property <bool> repo-loading;
     in-out property <[RepoItem]> recent;
@@ -217,6 +228,14 @@ export global AppState {
     in-out property <string> branch-query;
     in-out property <string> gh-query;
     in-out property <string> new-branch-name;
+    // Generic name/message dialog (create tag, rename branch).
+    in-out property <string> input-title;
+    in-out property <string> input-label;
+    in-out property <string> input-value;
+    in-out property <string> input-hint;
+    in-out property <string> input-button;
+    in-out property <bool> input-has-message;
+    in-out property <string> input-message;
     // Non-empty while this repository's config/hooks run programs and it isn't trusted yet.
     in-out property <string> untrusted-summary;
     // Resizable left column of the Changes and History views (logical px).
@@ -301,6 +320,20 @@ export global AppState {
     callback step-commit(int) -> int;
     callback panel-resized();
     callback open-log();
+    // history editing
+    callback abort-operation();
+    callback continue-operation();
+    callback cherry-pick(string);
+    callback create-tag(string);
+    callback undo-commit();
+    callback rename-branch(string);
+    callback delete-tag(string);
+    callback push-tag(string);
+    callback show-stashes();
+    callback stash-apply(int);
+    callback stash-pop-at(int);
+    callback stash-drop(int);
+    callback input-accept();
     callback check-updates();
     callback set-update-check(bool);
 }

@@ -105,9 +105,18 @@ impl App {
         let Some(root) = self.repo() else { return };
         let app = self.clone();
         self.spawn(async move {
-            match blocking(move || git::branches(&git::open(&root)?)).await {
-                Ok(b) => {
-                    app.st().branches = b;
+            match blocking(move || {
+                let repo = git::open(&root)?;
+                Ok((git::branches(&repo)?, git::tags(&repo)?))
+            })
+            .await
+            {
+                Ok((b, t)) => {
+                    {
+                        let mut s = app.st();
+                        s.branches = b;
+                        s.tags = t;
+                    }
                     app.push_branches();
                 }
                 Err(e) => app.fail(e),
@@ -127,12 +136,23 @@ impl App {
                     name: sh(b.name.clone()),
                     is_head: b.is_head,
                     is_remote: b.is_remote,
+                    is_tag: false,
                     upstream: sh(b.upstream.clone().unwrap_or_default()),
                     ahead: b.ahead as i32,
                     behind: b.behind as i32,
                     when: sh(if b.time > 0 { util::relative_time(b.time, now) } else { String::new() }),
                     summary: sh(b.summary.clone()),
                 })
+                .chain(s.tags.iter().filter(|t| q.is_empty() || t.name.to_lowercase().contains(&q)).map(|t| {
+                    BranchItem {
+                        name: sh(t.name.clone()),
+                        is_tag: true,
+                        upstream: sh(t.target.clone()),
+                        when: sh(util::relative_time(t.time, now)),
+                        summary: sh(t.summary.clone()),
+                        ..Default::default()
+                    }
+                }))
                 .collect()
         };
         self.ui(move |_, st| set_model!(st, get_branches, set_branches, items));

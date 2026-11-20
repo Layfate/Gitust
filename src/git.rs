@@ -54,6 +54,8 @@ pub struct Summary {
     pub remote: Option<String>,
     pub github_slug: Option<String>,
     pub stash_count: usize,
+    /// HEAD has a parent, so "undo last commit" is possible.
+    pub head_has_parent: bool,
     pub staged: Vec<FileChange>,
     pub unstaged: Vec<FileChange>,
     pub conflicted: usize,
@@ -236,6 +238,7 @@ pub fn summary(repo: &Repository) -> Result<Summary> {
     s.remote = default_remote(repo);
     s.github_slug = github_slug(repo);
     s.stash_count = repo.reflog("refs/stash").map(|r| r.len()).unwrap_or(0);
+    s.head_has_parent = head_has_parent(repo);
     let (staged, unstaged, conflicted) = status(repo)?;
     s.staged = staged;
     s.unstaged = unstaged;
