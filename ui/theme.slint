@@ -1,0 +1,48 @@
+// Design tokens. Primer-inspired neutrals with a Rust-orange brand accent.
+export global T {
+    in-out property <bool> dark: true;
+    in-out property <string> mono: "Consolas";
+
+    out property <color> bg: dark ? #0d1117 : #ffffff;
+    out property <color> surface: dark ? #151b23 : #f6f8fa;
+    out property <color> surface-2: dark ? #1d242d : #eef1f4;
+    out property <color> raised: dark ? #212830 : #ffffff;
+    out property <color> hover: dark ? #b1bac41a : #8189961a;
+    out property <color> pressed: dark ? #b1bac42e : #8189962e;
+    out property <color> selected: dark ? #388bfd26 : #0969da17;
+    out property <color> border: dark ? #2f363e : #d1d9e0;
+    out property <color> border-strong: dark ? #3d444d : #c1c9d1;
+    out property <color> fg: dark ? #e6edf3 : #1f2328;
+    out property <color> muted: dark ? #9198a1 : #59636e;
+    out property <color> subtle: dark ? #6e7681 : #818b98;
+    out property <color> accent: dark ? #4493f8 : #0969da;
+    out property <color> accent-fg: #ffffff;
+    out property <color> brand: dark ? #ff8a3d : #d9480f;
+    out property <color> green: dark ? #3fb950 : #1a7f37;
+    out property <color> red: dark ? #f85149 : #d1242f;
+    out property <color> yellow: dark ? #d29922 : #9a6700;
+    out property <color> purple: dark ? #ab7df8 : #8250df;
+    out property <color> add-bg: dark ? #2ea04326 : #dafbe1;
+    out property <color> add-gutter: dark ? #3fb9504d : #aceebb;
+    out property <color> del-bg: dark ? #f8514926 : #ffebe9;
+    out property <color> del-gutter: dark ? #f851494d : #ffcecb;
+    out property <color> hunk-bg: dark ? #388bfd1a : #ddf4ff;
+    out property <color> ours-bg: dark ? #388bfd26 : #ddf4ff;
+    out property <color> theirs-bg: dark ? #ab7df826 : #fbefff;
+    out property <color> scrim: dark ? #010409b3 : #1f232866;
+
+    out property <length> radius: 6px;
+    out property <length> fs-xs: 11px;
+    out property <length> fs-sm: 12px;
+    out property <length> fs: 13px;
+    out property <length> fs-lg: 15px;
+    out property <length> fs-xl: 20px;
+
+    public pure function status-color(s: string) -> color {
+        if s == "A" || s == "?" { return green; }
+        if s == "D" { return red; }
+        if s == "U" { return red; }
+        if s == "R" || s == "T" { return purple; }
+        return yellow;
+    }
+}

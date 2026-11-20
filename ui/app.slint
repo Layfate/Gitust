@@ -1,0 +1,281 @@
+import { Palette } from "std-widgets.slint";
+import { T } from "theme.slint";
+import { AppState, ChangeRow, DiffLine, CommitItem, BranchItem, RepoItem, GhRepoItem, GhItem, PaletteItem } from "state.slint";
+import { VDivider } from "widgets.slint";
+import { Sidebar, RepoHeader, TabsBar, StatusBar } from "chrome.slint";
+import { ChangesView, HistoryView, BranchesView, GitHubView, Welcome } from "views.slint";
+import { CloneDialog, NewBranchDialog, ConfirmDialog, ErrorDialog, SettingsDialog, CommandPalette } from "dialogs.slint";
+
+export { AppState, T, ChangeRow, DiffLine, CommitItem, BranchItem, RepoItem, GhRepoItem, GhItem, PaletteItem }
+
+export component MainWindow inherits Window {
+    title: AppState.has-repo ? AppState.repo-name + " · " + AppState.branch + " — Gitust" : "Gitust";
+    icon: @image-url("icons/logo.svg");
+    preferred-width: 1280px;
+    preferred-height: 800px;
+    min-width: 940px;
+    min-height: 580px;
+    background: T.bg;
+    default-font-size: 13px;
+
+    property <bool> system-dark;
+    property <int> mode: AppState.theme-mode;
+
+    function apply-theme() {
+        T.dark = root.mode == 2 || (root.mode == 0 && root.system-dark);
+        Palette.color-scheme = T.dark ? ColorScheme.dark : ColorScheme.light;
+    }
+
+    init => {
+        root.system-dark = Palette.color-scheme == ColorScheme.dark;
+        root.apply-theme();
+    }
+    changed mode => { root.apply-theme(); }
+
+    function goto(t: int) {
+        if t == 3 || AppState.has-repo {
+            AppState.tab = t;
+            AppState.tab-changed(t);
+        }
+    }
+
+    MenuBar {
+        Menu {
+            title: "File";
+            MenuItem {
+                title: "Open repository…";
+                shortcut: @keys(Control + O);
+                activated => { AppState.open-repo-dialog(); }
+            }
+            MenuItem {
+                title: "Clone repository…";
+                shortcut: @keys(Control + Shift + N);
+                activated => { AppState.show-clone(""); }
+            }
+            MenuSeparator { }
+            MenuItem {
+                title: "Command palette";
+                shortcut: @keys(Control + P);
+                activated => { AppState.show-dialog("palette"); }
+            }
+            MenuItem {
+                title: "Settings";
+                shortcut: @keys(Control + ",");
+                activated => { AppState.show-dialog("settings"); }
+            }
+        }
+        Menu {
+            title: "Repository";
+            MenuItem {
+                title: "Refresh";
+                shortcut: @keys(F5);
+                enabled: AppState.has-repo;
+                activated => { AppState.refresh(); }
+            }
+            MenuItem {
+                title: "Fetch";
+                shortcut: @keys(Control + Shift + F);
+                enabled: AppState.has-repo && AppState.remote != "";
+                activated => { AppState.fetch(); }
+            }
+            MenuItem {
+                title: "Pull";
+                shortcut: @keys(Control + Shift + L);
+                enabled: AppState.has-repo && AppState.has-upstream;
+                activated => { AppState.pull(); }
+            }
+            MenuItem {
+                title: AppState.has-upstream ? "Push" : "Publish branch";
+                shortcut: @keys(Control + Shift + P);
+                enabled: AppState.has-repo && AppState.remote != "";
+                activated => { AppState.push(); }
+            }
+            MenuSeparator { }
+            MenuItem {
+                title: "Commit";
+                shortcut: @keys(Control + Return);
+                enabled: AppState.has-repo;
+                activated => { AppState.commit(); }
+            }
+            MenuItem {
+                title: "Stage all";
+                shortcut: @keys(Control + Shift + A);
+                enabled: AppState.has-repo;
+                activated => { AppState.stage-all(); }
+            }
+            MenuItem {
+                title: "Stash all changes";
+                shortcut: @keys(Control + Shift + S);
+                enabled: AppState.has-repo;
+                activated => { AppState.stash(); }
+            }
+            MenuItem {
+                title: "Pop latest stash";
+                enabled: AppState.has-repo && AppState.stash-count > 0;
+                activated => { AppState.stash-pop(); }
+            }
+            MenuSeparator { }
+            MenuItem {
+                title: "Open in terminal";
+                shortcut: @keys(Control + "`");
+                enabled: AppState.has-repo;
+                activated => { AppState.open-terminal(); }
+            }
+            MenuItem {
+                title: "Show in file manager";
+                shortcut: @keys(Control + Shift + E);
+                enabled: AppState.has-repo;
+                activated => { AppState.open-in-explorer(); }
+            }
+            MenuItem {
+                title: "Open on GitHub";
+                shortcut: @keys(Control + Shift + G);
+                enabled: AppState.github-slug != "";
+                activated => { AppState.open-on-github(); }
+            }
+            MenuItem {
+                title: "Create pull request";
+                shortcut: @keys(Control + Shift + R);
+                enabled: AppState.github-slug != "";
+                activated => { AppState.create-pr(); }
+            }
+        }
+        Menu {
+            title: "Branch";
+            MenuItem {
+                title: "New branch…";
+                shortcut: @keys(Control + B);
+                enabled: AppState.has-repo;
+                activated => { AppState.show-dialog("new-branch"); }
+            }
+            MenuItem {
+                title: "Switch branch…";
+                shortcut: @keys(Control + Shift + B);
+                enabled: AppState.has-repo;
+                activated => { AppState.show-dialog("switch-branch"); }
+            }
+        }
+        Menu {
+            title: "View";
+            MenuItem {
+                title: "Changes";
+                shortcut: @keys(Control + "1");
+                activated => { root.goto(0); }
+            }
+            MenuItem {
+                title: "History";
+                shortcut: @keys(Control + "2");
+                activated => { root.goto(1); }
+            }
+            MenuItem {
+                title: "Branches";
+                shortcut: @keys(Control + "3");
+                activated => { root.goto(2); }
+            }
+            MenuItem {
+                title: "GitHub";
+                shortcut: @keys(Control + "4");
+                activated => { root.goto(3); }
+            }
+            MenuSeparator { }
+            Menu {
+                title: "Theme";
+                MenuItem {
+                    title: "System";
+                    checkable: true;
+                    checked: AppState.theme-mode == 0;
+                    activated => { AppState.set-theme(0); }
+                }
+                MenuItem {
+                    title: "Light";
+                    checkable: true;
+                    checked: AppState.theme-mode == 1;
+                    activated => { AppState.set-theme(1); }
+                }
+                MenuItem {
+                    title: "Dark";
+                    checkable: true;
+                    checked: AppState.theme-mode == 2;
+                    activated => { AppState.set-theme(2); }
+                }
+            }
+        }
+        Menu {
+            title: "Help";
+            MenuItem {
+                title: "Keyboard shortcuts";
+                activated => { AppState.show-dialog("settings"); }
+            }
+            MenuItem {
+                title: "Gitust on GitHub";
+                activated => { AppState.open-url("https://github.com/search?q=gitust&type=repositories"); }
+            }
+        }
+    }
+
+    VerticalLayout {
+        HorizontalLayout {
+            vertical-stretch: 1;
+            Sidebar { }
+            VDivider { }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                if AppState.has-repo: RepoHeader { }
+                TabsBar { }
+                if !AppState.has-repo && AppState.tab != 3: Welcome {
+                    vertical-stretch: 1;
+                }
+                if AppState.has-repo && AppState.tab == 0: ChangesView {
+                    vertical-stretch: 1;
+                }
+                if AppState.has-repo && AppState.tab == 1: HistoryView {
+                    vertical-stretch: 1;
+                }
+                if AppState.has-repo && AppState.tab == 2: BranchesView {
+                    vertical-stretch: 1;
+                }
+                if AppState.tab == 3: GitHubView {
+                    vertical-stretch: 1;
+                }
+            }
+        }
+        StatusBar { }
+    }
+
+    if AppState.dialog == "clone": CloneDialog {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+    }
+    if AppState.dialog == "new-branch": NewBranchDialog {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+    }
+    if AppState.dialog == "confirm": ConfirmDialog {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+    }
+    if AppState.dialog == "error": ErrorDialog {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+    }
+    if AppState.dialog == "settings": SettingsDialog {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+    }
+    if AppState.dialog == "palette": CommandPalette {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+    }
+}

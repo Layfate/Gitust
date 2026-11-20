@@ -1,0 +1,348 @@
+import { T } from "theme.slint";
+
+export component HDivider inherits Rectangle {
+    height: 1px;
+    background: T.border;
+}
+
+export component VDivider inherits Rectangle {
+    width: 1px;
+    background: T.border;
+}
+
+export component Spacer inherits Rectangle {
+    horizontal-stretch: 1;
+}
+
+export component IconButton inherits Rectangle {
+    in property <image> icon;
+    in property <string> label;
+    in property <bool> enabled: true;
+    in property <color> tint: T.muted;
+    in property <length> icon-size: 16px;
+    callback clicked;
+
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    background: !root.enabled ? transparent : ta.pressed ? T.pressed : ta.has-hover ? T.hover : transparent;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.clicked(); }
+
+    Image {
+        source: root.icon;
+        width: root.icon-size;
+        height: root.icon-size;
+        colorize: !root.enabled ? T.subtle : ta.has-hover ? T.fg : root.tint;
+    }
+
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? MouseCursor.pointer : MouseCursor.default;
+        clicked => { root.clicked(); }
+    }
+}
+
+// Neutral / primary / danger button that follows the app theme (not the OS style).
+export component FlatButton inherits Rectangle {
+    in property <string> text;
+    in property <image> icon;
+    in property <bool> has-icon;
+    in property <bool> enabled: true;
+    in property <bool> primary;
+    in property <bool> danger;
+    in property <bool> quiet;
+    in property <length> font-size: T.fs;
+    callback clicked;
+
+    property <color> base: root.primary ? T.accent : root.danger ? T.red : T.surface-2;
+    property <color> fg: root.primary || root.danger ? T.accent-fg : T.fg;
+
+    height: 30px;
+    min-width: lay.preferred-width;
+    border-radius: 6px;
+    opacity: root.enabled ? 1.0 : 0.45;
+    background: root.quiet
+        ? (ta.pressed ? T.pressed : ta.has-hover ? T.hover : transparent)
+        : (ta.pressed ? root.base.darker(0.15) : ta.has-hover ? root.base.brighter(0.08) : root.base);
+    border-width: root.primary || root.danger || root.quiet ? 0px : 1px;
+    border-color: T.border;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-action-default => { if root.enabled { root.clicked(); } }
+
+    lay := HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 6px;
+        alignment: center;
+        if root.has-icon: VerticalLayout {
+            alignment: center;
+            Image {
+                source: root.icon;
+                width: 14px;
+                height: 14px;
+                colorize: root.quiet ? T.muted : root.fg;
+            }
+        }
+        Text {
+            text: root.text;
+            color: root.fg;
+            font-size: root.font-size;
+            font-weight: 500;
+            vertical-alignment: center;
+        }
+    }
+
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? MouseCursor.pointer : MouseCursor.default;
+        clicked => { root.clicked(); }
+    }
+}
+
+// Big header action ("Fetch / last fetched 3m ago").
+export component ToolbarButton inherits Rectangle {
+    in property <image> icon;
+    in property <string> title;
+    in property <string> subtitle;
+    in property <string> badge;
+    in property <bool> enabled: true;
+    in property <bool> emphasize;
+    callback clicked;
+
+    height: 44px;
+    min-width: max(116px, lay.preferred-width);
+    border-radius: 8px;
+    background: !root.enabled ? transparent : ta.pressed ? T.pressed : ta.has-hover ? T.hover : transparent;
+    accessible-role: button;
+    accessible-label: root.title;
+    accessible-action-default => { if root.enabled { root.clicked(); } }
+
+    lay := HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 12px;
+        spacing: 10px;
+        VerticalLayout {
+            alignment: center;
+            Image {
+                source: root.icon;
+                width: 16px;
+                height: 16px;
+                colorize: !root.enabled ? T.subtle : root.emphasize ? T.brand : T.fg;
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 1px;
+            Text {
+                text: root.title;
+                color: root.enabled ? T.fg : T.subtle;
+                font-weight: 600;
+            }
+            if root.subtitle != "": Text {
+                text: root.subtitle;
+                color: T.muted;
+                font-size: T.fs-xs;
+            }
+        }
+        if root.badge != "": VerticalLayout {
+            alignment: center;
+            Rectangle {
+                height: 18px;
+                width: max(18px, badge-text.preferred-width + 10px);
+                border-radius: 9px;
+                background: T.brand;
+                badge-text := Text {
+                    text: root.badge;
+                    color: #ffffff;
+                    font-size: T.fs-xs;
+                    font-weight: 700;
+                }
+            }
+        }
+    }
+
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? MouseCursor.pointer : MouseCursor.default;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component Chip inherits Rectangle {
+    in property <string> text;
+    in property <color> tone: T.muted;
+    height: 18px;
+    width: label.preferred-width + 14px;
+    border-radius: 9px;
+    background: root.tone.with-alpha(0.14);
+    border-width: 1px;
+    border-color: root.tone.with-alpha(0.38);
+    label := Text {
+        text: root.text;
+        color: root.tone;
+        font-size: T.fs-xs;
+        font-weight: 600;
+    }
+}
+
+export component Counter inherits Rectangle {
+    in property <int> value;
+    in property <bool> strong;
+    height: 18px;
+    width: max(18px, num.preferred-width + 10px);
+    border-radius: 9px;
+    background: root.strong ? T.brand : T.surface-2;
+    num := Text {
+        text: root.value;
+        color: root.strong ? #ffffff : T.muted;
+        font-size: T.fs-xs;
+        font-weight: 600;
+    }
+}
+
+export component StatusBadge inherits Rectangle {
+    in property <string> status;
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+    border-width: 1.5px;
+    border-color: T.status-color(root.status);
+    background: T.status-color(root.status).with-alpha(0.12);
+    Text {
+        text: root.status == "?" ? "+" : root.status == "U" ? "!" : root.status;
+        color: T.status-color(root.status);
+        font-size: 10px;
+        font-weight: 800;
+    }
+}
+
+export component TabButton inherits Rectangle {
+    in property <string> title;
+    in property <image> icon;
+    in property <bool> active;
+    in property <bool> enabled: true;
+    in property <int> count;
+    callback clicked;
+
+    height: 38px;
+    min-width: lay.preferred-width;
+    opacity: root.enabled ? 1.0 : 0.4;
+    accessible-role: tab;
+    accessible-label: root.title;
+    accessible-action-default => { root.clicked(); }
+
+    Rectangle {
+        y: 4px;
+        height: parent.height - 8px;
+        border-radius: 6px;
+        background: ta.has-hover && !root.active && root.enabled ? T.hover : transparent;
+    }
+
+    lay := HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 7px;
+        VerticalLayout {
+            alignment: center;
+            Image {
+                source: root.icon;
+                width: 14px;
+                height: 14px;
+                colorize: root.active ? T.fg : T.muted;
+            }
+        }
+        Text {
+            text: root.title;
+            vertical-alignment: center;
+            color: root.active ? T.fg : T.muted;
+            font-weight: root.active ? 600 : 400;
+        }
+        if root.count > 0: VerticalLayout {
+            alignment: center;
+            Counter { value: root.count; strong: root.active; }
+        }
+    }
+
+    Rectangle {
+        x: 8px;
+        y: parent.height - 2px;
+        width: parent.width - 16px;
+        height: 2px;
+        border-radius: 1px;
+        background: root.active ? T.brand : transparent;
+    }
+
+    ta := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? MouseCursor.pointer : MouseCursor.default;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component SectionLabel inherits Text {
+    color: T.subtle;
+    font-size: T.fs-xs;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+}
+
+export component EmptyState inherits VerticalLayout {
+    in property <image> icon;
+    in property <string> title;
+    in property <string> message;
+    alignment: center;
+    spacing: 8px;
+    padding: 24px;
+    HorizontalLayout {
+        alignment: center;
+        Image {
+            source: root.icon;
+            width: 40px;
+            height: 40px;
+            colorize: T.subtle;
+        }
+    }
+    Text {
+        text: root.title;
+        horizontal-alignment: center;
+        font-size: T.fs-lg;
+        font-weight: 600;
+        color: T.fg;
+    }
+    Text {
+        text: root.message;
+        horizontal-alignment: center;
+        color: T.muted;
+        wrap: word-wrap;
+    }
+    @children
+}
+
+export component Banner inherits Rectangle {
+    in property <string> text;
+    in property <color> tone: T.yellow;
+    background: root.tone.with-alpha(0.12);
+    border-width: 1px;
+    border-color: root.tone.with-alpha(0.35);
+    border-radius: 6px;
+    HorizontalLayout {
+        padding: 10px;
+        spacing: 8px;
+        Rectangle {
+            width: 3px;
+            border-radius: 1.5px;
+            background: root.tone;
+        }
+        Text {
+            text: root.text;
+            color: T.fg;
+            wrap: word-wrap;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+        @children
+    }
+}

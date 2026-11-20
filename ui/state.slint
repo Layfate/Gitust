@@ -1,0 +1,238 @@
+// The single bridge between Rust and the view. Rust owns all state and logic;
+// Slint only renders these properties and forwards user intent via callbacks.
+
+export struct ChangeRow {
+    header: bool,
+    staged: bool,
+    title: string,
+    count: int,
+    path: string,
+    name: string,
+    dir: string,
+    status: string,
+}
+
+export struct DiffLine {
+    // 0 context, 1 add, 2 delete, 3 hunk, 4 file header, 5 note, 6 conflict marker, 7 ours, 8 theirs
+    kind: int,
+    old-no: string,
+    new-no: string,
+    text: string,
+}
+
+export struct CommitItem {
+    id: string,
+    short-id: string,
+    summary: string,
+    author: string,
+    when: string,
+    refs: string,
+    unpushed: bool,
+    merge: bool,
+}
+
+export struct BranchItem {
+    name: string,
+    is-head: bool,
+    is-remote: bool,
+    upstream: string,
+    ahead: int,
+    behind: int,
+    when: string,
+    summary: string,
+}
+
+export struct RepoItem {
+    name: string,
+    path: string,
+    pinned: bool,
+    current: bool,
+    missing: bool,
+}
+
+export struct GhRepoItem {
+    full-name: string,
+    description: string,
+    private: bool,
+    fork: bool,
+    archived: bool,
+    stars: string,
+    language: string,
+    updated: string,
+    clone-url: string,
+    html-url: string,
+    local-path: string,
+}
+
+export struct GhItem {
+    kind: string, // "pr" | "issue" | "notification"
+    title: string,
+    subtitle: string,
+    state: string, // "open" | "closed" | "merged" | "draft" | reason for notifications
+    url: string,
+    unread: bool,
+}
+
+export struct PaletteItem {
+    id: string,
+    label: string,
+    hint: string,
+    group: string,
+}
+
+export global AppState {
+    // ---- repository ----
+    in-out property <bool> has-repo;
+    in-out property <string> repo-name;
+    in-out property <string> repo-path;
+    in-out property <string> branch;
+    in-out property <bool> detached;
+    in-out property <bool> unborn;
+    in-out property <bool> has-upstream;
+    in-out property <string> upstream;
+    in-out property <string> remote;
+    in-out property <int> ahead;
+    in-out property <int> behind;
+    in-out property <string> repo-state;
+    in-out property <string> github-slug;
+    in-out property <int> stash-count;
+    in-out property <string> last-fetched;
+    in-out property <bool> repo-loading;
+    in-out property <[RepoItem]> recent;
+
+    // ---- changes ----
+    in-out property <[ChangeRow]> changes;
+    in-out property <int> staged-count;
+    in-out property <int> unstaged-count;
+    in-out property <int> conflicted-count;
+    in-out property <string> selected-path;
+    in-out property <bool> selected-staged;
+    in-out property <string> commit-summary;
+    in-out property <string> commit-body;
+    in-out property <bool> amend;
+
+    // ---- diff panel (shared by Changes and History) ----
+    in-out property <[DiffLine]> diff;
+    in-out property <string> diff-title;
+    in-out property <string> diff-dir;
+    in-out property <string> diff-status;
+    in-out property <int> diff-adds;
+    in-out property <int> diff-dels;
+    in-out property <int> diff-files;
+    in-out property <int> diff-max-chars;
+    in-out property <bool> diff-loading;
+    in-out property <bool> diff-truncated;
+    in-out property <string> diff-too-large;
+    in-out property <bool> diff-binary;
+
+    // ---- history ----
+    in-out property <[CommitItem]> commits;
+    in-out property <bool> commits-loading;
+    in-out property <bool> commits-exhausted;
+    in-out property <string> selected-commit;
+    in-out property <string> detail-summary;
+    in-out property <string> detail-body;
+    in-out property <string> detail-meta;
+
+    // ---- branches ----
+    in-out property <[BranchItem]> branches;
+
+    // ---- GitHub ----
+    in-out property <bool> gh-signed-in;
+    in-out property <string> gh-login;
+    in-out property <bool> gh-loading;
+    in-out property <string> gh-error;
+    in-out property <int> gh-tab;
+    in-out property <bool> gh-this-repo: true;
+    in-out property <[GhRepoItem]> gh-repos;
+    in-out property <[GhItem]> gh-items;
+    in-out property <bool> device-flow-available;
+    in-out property <string> device-code;
+    in-out property <string> device-url;
+    in-out property <bool> signing-in;
+
+    // ---- chrome ----
+    in-out property <int> tab;
+    in-out property <string> status-text;
+    in-out property <bool> status-error;
+    in-out property <bool> busy;
+    in-out property <string> busy-text;
+    in-out property <float> busy-progress: -1;
+    in-out property <bool> busy-cancellable;
+    in-out property <string> dialog;
+    in-out property <string> confirm-title;
+    in-out property <string> confirm-text;
+    in-out property <string> confirm-button;
+    in-out property <bool> confirm-danger;
+    in-out property <string> clone-url;
+    in-out property <string> clone-dest;
+    in-out property <string> clone-root;
+    in-out property <int> theme-mode;
+    in-out property <string> version;
+    in-out property <string> startup-time;
+    in-out property <[PaletteItem]> palette-items;
+    in-out property <int> palette-index;
+    in-out property <string> error-detail;
+    in-out property <string> history-query;
+    in-out property <string> branch-query;
+    in-out property <string> gh-query;
+    in-out property <string> new-branch-name;
+
+    // ---- intents ----
+    callback open-repo-dialog();
+    callback open-repo(string);
+    callback remove-recent(string);
+    callback toggle-pin(string);
+    callback refresh();
+    callback select-change(string, bool);
+    callback stage(string);
+    callback unstage(string);
+    callback stage-all();
+    callback unstage-all();
+    callback discard(string);
+    callback load-full-diff();
+    callback commit();
+    callback amend-toggled(bool);
+    callback stash();
+    callback stash-pop();
+    callback select-commit(string);
+    callback revert-commit(string);
+    callback open-commit-on-github(string);
+    callback load-more-commits();
+    callback history-filter(string);
+    callback checkout(string, bool);
+    callback create-branch(string);
+    callback delete-branch(string);
+    callback merge-branch(string);
+    callback branch-filter(string);
+    callback fetch();
+    callback pull();
+    callback push();
+    callback cancel-op();
+    callback show-clone(string);
+    callback clone-url-edited(string);
+    callback browse-clone-dest();
+    callback start-clone();
+    callback gh-sign-in-cli();
+    callback gh-sign-in-token(string);
+    callback gh-sign-in-device();
+    callback gh-cancel-sign-in();
+    callback gh-sign-out();
+    callback gh-refresh();
+    callback gh-tab-changed(int);
+    callback gh-filter(string);
+    callback gh-scope-changed(bool);
+    callback open-url(string);
+    callback open-in-explorer();
+    callback open-terminal();
+    callback open-file(string);
+    callback open-on-github();
+    callback create-pr();
+    callback palette-query(string);
+    callback palette-run(string);
+    callback confirm-accept();
+    callback set-theme(int);
+    callback browse-clone-root();
+    callback tab-changed(int);
+    callback show-dialog(string);
+}

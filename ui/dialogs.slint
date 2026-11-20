@@ -1,0 +1,454 @@
+import { LineEdit, TextEdit, ListView } from "std-widgets.slint";
+import { T } from "theme.slint";
+import { AppState, PaletteItem } from "state.slint";
+import { FlatButton, IconButton, HDivider, SectionLabel, Spacer } from "widgets.slint";
+
+component Modal inherits Rectangle {
+    in property <string> title;
+    in property <length> card-width: 480px;
+    callback close;
+    callback submit;
+
+    background: T.scrim;
+    TouchArea {
+        clicked => { root.close(); }
+    }
+
+    FocusScope {
+        capture-key-pressed(e) => {
+            if e.text == Key.Escape {
+                root.close();
+                return accept;
+            }
+            reject
+        }
+
+        card := Rectangle {
+            width: min(root.card-width, root.width - 32px);
+            height: lay.preferred-height;
+            x: (root.width - self.width) / 2;
+            y: max(48px, (root.height - self.height) / 3);
+            background: T.raised;
+            border-radius: 12px;
+            border-width: 1px;
+            border-color: T.border;
+            drop-shadow-blur: 28px;
+            drop-shadow-offset-y: 8px;
+            drop-shadow-color: #00000059;
+
+            TouchArea { }
+
+            lay := VerticalLayout {
+                padding: 20px;
+                spacing: 14px;
+                HorizontalLayout {
+                    Text {
+                        text: root.title;
+                        font-size: 17px;
+                        font-weight: 700;
+                        color: T.fg;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    IconButton {
+                        icon: @image-url("icons/close.svg");
+                        label: "Close";
+                        clicked => { root.close(); }
+                    }
+                }
+                @children
+            }
+        }
+    }
+}
+
+component FieldLabel inherits Text {
+    color: T.muted;
+    font-size: T.fs-sm;
+    font-weight: 600;
+}
+
+export component CloneDialog inherits Modal {
+    title: "Clone a repository";
+    close => { AppState.dialog = ""; }
+    init => { url.focus(); }
+
+    FieldLabel { text: "Repository URL or owner/name"; }
+    url := LineEdit {
+        placeholder-text: "https://github.com/owner/repo  ·  git@host:owner/repo.git  ·  owner/repo";
+        text <=> AppState.clone-url;
+        edited(t) => { AppState.clone-url-edited(t); }
+        accepted => { AppState.start-clone(); }
+    }
+    FieldLabel { text: "Local path"; }
+    HorizontalLayout {
+        spacing: 8px;
+        LineEdit {
+            text <=> AppState.clone-dest;
+            accepted => { AppState.start-clone(); }
+        }
+        FlatButton {
+            height: 32px;
+            text: "Browse…";
+            clicked => { AppState.browse-clone-dest(); }
+        }
+    }
+    Text {
+        text: "Cloning uses your installed Git, so your credential manager and SSH keys just work.";
+        color: T.subtle;
+        font-size: T.fs-xs;
+        wrap: word-wrap;
+    }
+    HorizontalLayout {
+        spacing: 8px;
+        alignment: end;
+        FlatButton {
+            text: "Cancel";
+            clicked => { AppState.dialog = ""; }
+        }
+        FlatButton {
+            primary: true;
+            text: "Clone";
+            enabled: AppState.clone-url != "" && AppState.clone-dest != "" && !AppState.busy;
+            clicked => { AppState.start-clone(); }
+        }
+    }
+}
+
+export component NewBranchDialog inherits Modal {
+    title: "Create a branch";
+    close => { AppState.dialog = ""; }
+    init => { name.focus(); }
+
+    FieldLabel { text: "Name"; }
+    name := LineEdit {
+        placeholder-text: "feature/my-change";
+        text <=> AppState.new-branch-name;
+        accepted(t) => { AppState.create-branch(t); }
+    }
+    Text {
+        text: AppState.unborn ? "The branch will be created when you make your first commit." : "Based on " + AppState.branch + ". Uncommitted changes come along with you.";
+        color: T.subtle;
+        font-size: T.fs-sm;
+        wrap: word-wrap;
+    }
+    HorizontalLayout {
+        spacing: 8px;
+        alignment: end;
+        FlatButton {
+            text: "Cancel";
+            clicked => { AppState.dialog = ""; }
+        }
+        FlatButton {
+            primary: true;
+            text: "Create and switch";
+            enabled: AppState.new-branch-name != "" && !AppState.busy;
+            clicked => { AppState.create-branch(AppState.new-branch-name); }
+        }
+    }
+}
+
+export component ConfirmDialog inherits Modal {
+    title: AppState.confirm-title;
+    close => { AppState.dialog = ""; }
+    init => { fs.focus(); }
+
+    fs := FocusScope {
+        key-pressed(e) => {
+            if e.text == Key.Return {
+                AppState.confirm-accept();
+                return accept;
+            }
+            reject
+        }
+        Text {
+            text: AppState.confirm-text;
+            color: T.muted;
+            wrap: word-wrap;
+        }
+    }
+    HorizontalLayout {
+        spacing: 8px;
+        alignment: end;
+        FlatButton {
+            text: "Cancel";
+            clicked => { AppState.dialog = ""; }
+        }
+        FlatButton {
+            primary: !AppState.confirm-danger;
+            danger: AppState.confirm-danger;
+            text: AppState.confirm-button;
+            clicked => { AppState.confirm-accept(); }
+        }
+    }
+}
+
+export component ErrorDialog inherits Modal {
+    title: "Something went wrong";
+    card-width: 620px;
+    close => { AppState.dialog = ""; }
+
+    TextEdit {
+        text: AppState.error-detail;
+        read-only: true;
+        wrap: word-wrap;
+        font-family: T.mono;
+        font-size: T.fs-sm;
+        height: 220px;
+    }
+    HorizontalLayout {
+        alignment: end;
+        FlatButton {
+            primary: true;
+            text: "Close";
+            clicked => { AppState.dialog = ""; }
+        }
+    }
+}
+
+component Segment inherits Rectangle {
+    in property <string> text;
+    in property <bool> active;
+    callback clicked;
+    height: 30px;
+    horizontal-stretch: 1;
+    border-radius: 5px;
+    background: root.active ? T.raised : ta.has-hover ? T.hover : transparent;
+    border-width: root.active ? 1px : 0px;
+    border-color: T.border;
+    Text {
+        text: root.text;
+        color: root.active ? T.fg : T.muted;
+        font-weight: root.active ? 600 : 400;
+    }
+    ta := TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component KeyRow inherits HorizontalLayout {
+    in property <string> keys;
+    in property <string> label;
+    spacing: 12px;
+    Text {
+        text: root.label;
+        color: T.fg;
+        font-size: T.fs-sm;
+        horizontal-stretch: 1;
+    }
+    Text {
+        text: root.keys;
+        color: T.muted;
+        font-family: T.mono;
+        font-size: T.fs-sm;
+    }
+}
+
+export component SettingsDialog inherits Modal {
+    title: "Settings";
+    card-width: 560px;
+    close => { AppState.dialog = ""; }
+
+    SectionLabel { text: "APPEARANCE"; }
+    Rectangle {
+        height: 36px;
+        border-radius: 7px;
+        background: T.surface-2;
+        HorizontalLayout {
+            padding: 3px;
+            spacing: 3px;
+            Segment {
+                text: "System";
+                active: AppState.theme-mode == 0;
+                clicked => { AppState.set-theme(0); }
+            }
+            Segment {
+                text: "Light";
+                active: AppState.theme-mode == 1;
+                clicked => { AppState.set-theme(1); }
+            }
+            Segment {
+                text: "Dark";
+                active: AppState.theme-mode == 2;
+                clicked => { AppState.set-theme(2); }
+            }
+        }
+    }
+
+    SectionLabel { text: "CLONE FOLDER"; }
+    HorizontalLayout {
+        spacing: 8px;
+        Text {
+            text: AppState.clone-root;
+            color: T.fg;
+            font-family: T.mono;
+            font-size: T.fs-sm;
+            overflow: elide;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+        FlatButton {
+            text: "Change…";
+            clicked => { AppState.browse-clone-root(); }
+        }
+    }
+
+    SectionLabel { text: "GITHUB"; }
+    HorizontalLayout {
+        spacing: 8px;
+        Text {
+            text: AppState.gh-signed-in ? "Signed in as " + AppState.gh-login + " (token in OS credential vault)" : "Not signed in";
+            color: T.fg;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+        if AppState.gh-signed-in: FlatButton {
+            text: "Sign out";
+            clicked => { AppState.gh-sign-out(); }
+        }
+        if !AppState.gh-signed-in: FlatButton {
+            text: "Connect";
+            clicked => { AppState.dialog = ""; AppState.tab = 3; AppState.tab-changed(3); }
+        }
+    }
+
+    SectionLabel { text: "KEYBOARD"; }
+    VerticalLayout {
+        spacing: 4px;
+        KeyRow { label: "Command palette"; keys: "Ctrl+P"; }
+        KeyRow { label: "Commit"; keys: "Ctrl+Enter"; }
+        KeyRow { label: "Fetch · Pull · Push"; keys: "Ctrl+Shift+F · L · P"; }
+        KeyRow { label: "New branch · Switch branch"; keys: "Ctrl+B · Ctrl+Shift+B"; }
+        KeyRow { label: "Changes · History · Branches · GitHub"; keys: "Ctrl+1 … 4"; }
+        KeyRow { label: "Refresh"; keys: "F5"; }
+        KeyRow { label: "Terminal · File manager"; keys: "Ctrl+` · Ctrl+Shift+E"; }
+    }
+
+    HDivider { }
+    HorizontalLayout {
+        Text {
+            text: "Gitust " + AppState.version + " · Rust + Slint, no webview" + (AppState.startup-time != "" ? " · window ready in " + AppState.startup-time : "");
+            color: T.subtle;
+            font-size: T.fs-xs;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+        FlatButton {
+            primary: true;
+            text: "Done";
+            clicked => { AppState.dialog = ""; }
+        }
+    }
+}
+
+export component CommandPalette inherits Rectangle {
+    background: T.scrim;
+    TouchArea {
+        clicked => { AppState.dialog = ""; }
+    }
+
+    function run-selected() {
+        if AppState.palette-index >= 0 && AppState.palette-index < AppState.palette-items.length {
+            AppState.palette-run(AppState.palette-items[AppState.palette-index].id);
+        }
+    }
+
+    FocusScope {
+        capture-key-pressed(e) => {
+            if e.text == Key.Escape {
+                AppState.dialog = "";
+                return accept;
+            }
+            if e.text == Key.DownArrow {
+                AppState.palette-index = min(AppState.palette-index + 1, AppState.palette-items.length - 1);
+                list.ensure-row-visible(AppState.palette-index, ScrollBehavior.instant);
+                return accept;
+            }
+            if e.text == Key.UpArrow {
+                AppState.palette-index = max(AppState.palette-index - 1, 0);
+                list.ensure-row-visible(AppState.palette-index, ScrollBehavior.instant);
+                return accept;
+            }
+            if e.text == Key.Return {
+                root.run-selected();
+                return accept;
+            }
+            reject
+        }
+
+        Rectangle {
+            width: min(600px, root.width - 32px);
+            height: lay.preferred-height;
+            x: (root.width - self.width) / 2;
+            y: 72px;
+            background: T.raised;
+            border-radius: 12px;
+            border-width: 1px;
+            border-color: T.border;
+            drop-shadow-blur: 28px;
+            drop-shadow-offset-y: 8px;
+            drop-shadow-color: #00000066;
+            TouchArea { }
+
+            lay := VerticalLayout {
+                padding: 8px;
+                spacing: 6px;
+                query := LineEdit {
+                    placeholder-text: "Type a command, repository or branch…";
+                    edited(t) => {
+                        AppState.palette-index = 0;
+                        AppState.palette-query(t);
+                    }
+                    init => { self.focus(); }
+                }
+                list := ListView {
+                    height: min(AppState.palette-items.length * 36px, 396px);
+                    for it[i] in AppState.palette-items: Rectangle {
+                        height: 36px;
+                        border-radius: 6px;
+                        background: i == AppState.palette-index ? T.selected : ta.has-hover ? T.hover : transparent;
+                        ta := TouchArea {
+                            mouse-cursor: MouseCursor.pointer;
+                            clicked => { AppState.palette-run(it.id); }
+                        }
+                        HorizontalLayout {
+                            padding-left: 12px;
+                            padding-right: 12px;
+                            spacing: 10px;
+                            Text {
+                                text: it.group;
+                                color: T.subtle;
+                                font-size: T.fs-xs;
+                                vertical-alignment: center;
+                                width: 64px;
+                            }
+                            Text {
+                                text: it.label;
+                                color: T.fg;
+                                vertical-alignment: center;
+                                overflow: elide;
+                                horizontal-stretch: 1;
+                            }
+                            Text {
+                                text: it.hint;
+                                color: T.subtle;
+                                font-family: T.mono;
+                                font-size: T.fs-xs;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+                if AppState.palette-items.length == 0: Text {
+                    text: "No matches";
+                    color: T.subtle;
+                    horizontal-alignment: center;
+                    height: 36px;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}

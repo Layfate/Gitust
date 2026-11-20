@@ -1,0 +1,540 @@
+import { ListView, Spinner, ProgressIndicator } from "std-widgets.slint";
+import { T } from "theme.slint";
+import { AppState, RepoItem } from "state.slint";
+import { IconButton, FlatButton, ToolbarButton, TabButton, Chip, HDivider, VDivider, SectionLabel, Spacer } from "widgets.slint";
+
+component RepoRow inherits Rectangle {
+    in property <RepoItem> item;
+    height: 44px;
+    border-radius: 6px;
+    background: root.item.current ? T.selected : ta.has-hover ? T.hover : transparent;
+
+    ContextMenuArea {
+        Menu {
+            MenuItem {
+                title: "Open";
+                activated => { AppState.open-repo(root.item.path); }
+            }
+            MenuItem {
+                title: root.item.pinned ? "Unpin" : "Pin to top";
+                activated => { AppState.toggle-pin(root.item.path); }
+            }
+            MenuSeparator { }
+            MenuItem {
+                title: "Remove from list";
+                activated => { AppState.remove-recent(root.item.path); }
+            }
+        }
+
+        ta := TouchArea {
+            mouse-cursor: MouseCursor.pointer;
+            clicked => { AppState.open-repo(root.item.path); }
+
+            HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 6px;
+                spacing: 9px;
+                VerticalLayout {
+                    alignment: center;
+                    Image {
+                        source: @image-url("icons/repo.svg");
+                        width: 15px;
+                        height: 15px;
+                        colorize: root.item.current ? T.brand : T.muted;
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 1px;
+                    horizontal-stretch: 1;
+                    Text {
+                        text: root.item.name;
+                        color: root.item.missing ? T.subtle : T.fg;
+                        font-weight: root.item.current ? 600 : 400;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: root.item.missing ? "Not found on disk" : root.item.path;
+                        color: root.item.missing ? T.red : T.subtle;
+                        font-size: T.fs-xs;
+                        overflow: elide;
+                    }
+                }
+                if root.item.pinned && !ta.has-hover: VerticalLayout {
+                    alignment: center;
+                    Image {
+                        source: @image-url("icons/pin.svg");
+                        width: 12px;
+                        height: 12px;
+                        colorize: T.subtle;
+                    }
+                }
+                if ta.has-hover: VerticalLayout {
+                    alignment: center;
+                    IconButton {
+                        icon: @image-url("icons/close.svg");
+                        label: "Remove from list";
+                        icon-size: 12px;
+                        width: 22px;
+                        height: 22px;
+                        clicked => { AppState.remove-recent(root.item.path); }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component Sidebar inherits Rectangle {
+    width: 252px;
+    background: T.surface;
+
+    VerticalLayout {
+        HorizontalLayout {
+            padding: 14px;
+            padding-bottom: 12px;
+            spacing: 10px;
+            Image {
+                source: @image-url("icons/logo.svg");
+                width: 26px;
+                height: 26px;
+            }
+            VerticalLayout {
+                alignment: center;
+                Text {
+                    text: "Gitust";
+                    font-size: T.fs-lg;
+                    font-weight: 700;
+                    color: T.fg;
+                }
+            }
+            Spacer { }
+            VerticalLayout {
+                alignment: center;
+                IconButton {
+                    icon: @image-url("icons/command.svg");
+                    label: "Command palette (Ctrl+P)";
+                    clicked => { AppState.show-dialog("palette"); }
+                }
+            }
+        }
+
+        HorizontalLayout {
+            padding-left: 10px;
+            padding-right: 10px;
+            spacing: 6px;
+            FlatButton {
+                text: "Open";
+                icon: @image-url("icons/folder.svg");
+                has-icon: true;
+                horizontal-stretch: 1;
+                clicked => { AppState.open-repo-dialog(); }
+            }
+            FlatButton {
+                text: "Clone";
+                icon: @image-url("icons/download.svg");
+                has-icon: true;
+                horizontal-stretch: 1;
+                clicked => { AppState.show-clone(""); }
+            }
+        }
+
+        HorizontalLayout {
+            padding-left: 16px;
+            padding-top: 18px;
+            padding-bottom: 6px;
+            SectionLabel { text: "REPOSITORIES"; }
+        }
+
+        if AppState.recent.length == 0: VerticalLayout {
+            padding: 16px;
+            vertical-stretch: 1;
+            alignment: start;
+            Text {
+                text: "Repositories you open or clone appear here.";
+                color: T.subtle;
+                wrap: word-wrap;
+            }
+        }
+        if AppState.recent.length > 0: ListView {
+            vertical-stretch: 1;
+            for r in AppState.recent: Rectangle {
+                height: 46px;
+                RepoRow {
+                    x: 8px;
+                    width: parent.width - 16px;
+                    item: r;
+                }
+            }
+        }
+
+        HDivider { }
+
+        account := Rectangle {
+            height: 56px;
+            background: account-ta.has-hover ? T.hover : transparent;
+            account-ta := TouchArea {
+                mouse-cursor: MouseCursor.pointer;
+                clicked => {
+                    AppState.tab = 3;
+                    AppState.tab-changed(3);
+                }
+            }
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 8px;
+                spacing: 10px;
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: 28px;
+                        height: 28px;
+                        border-radius: 14px;
+                        background: AppState.gh-signed-in ? T.brand.with-alpha(0.18) : T.surface-2;
+                        Image {
+                            source: @image-url("icons/user.svg");
+                            width: 15px;
+                            height: 15px;
+                            colorize: AppState.gh-signed-in ? T.brand : T.muted;
+                        }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    horizontal-stretch: 1;
+                    spacing: 1px;
+                    Text {
+                        text: AppState.gh-signed-in ? AppState.gh-login : "Not signed in";
+                        color: T.fg;
+                        font-weight: 600;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: AppState.gh-signed-in ? "GitHub" : "Connect GitHub (optional)";
+                        color: T.subtle;
+                        font-size: T.fs-xs;
+                        overflow: elide;
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    IconButton {
+                        icon: @image-url("icons/settings.svg");
+                        label: "Settings (Ctrl+,)";
+                        clicked => { AppState.show-dialog("settings"); }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component RepoHeader inherits Rectangle {
+    height: 60px;
+    background: T.bg;
+
+    HorizontalLayout {
+        padding-left: 18px;
+        padding-right: 10px;
+        spacing: 2px;
+
+        VerticalLayout {
+            alignment: center;
+            spacing: 3px;
+            horizontal-stretch: 1;
+            min-width: 180px;
+            HorizontalLayout {
+                spacing: 8px;
+                Text {
+                    text: AppState.repo-name;
+                    font-size: T.fs-lg;
+                    font-weight: 700;
+                    color: T.fg;
+                    overflow: elide;
+                }
+                if AppState.repo-state != "": VerticalLayout {
+                    alignment: center;
+                    Chip { text: AppState.repo-state; tone: T.yellow; }
+                }
+                Spacer { }
+            }
+            branch-ta := TouchArea {
+                mouse-cursor: MouseCursor.pointer;
+                height: 18px;
+                clicked => { AppState.show-dialog("switch-branch"); }
+                HorizontalLayout {
+                    spacing: 6px;
+                    alignment: start;
+                    VerticalLayout {
+                        alignment: center;
+                        Image {
+                            source: @image-url("icons/branch.svg");
+                            width: 13px;
+                            height: 13px;
+                            colorize: T.brand;
+                        }
+                    }
+                    Text {
+                        text: AppState.branch + (AppState.detached ? " (detached HEAD)" : AppState.unborn ? " (no commits yet)" : "");
+                        color: branch-ta.has-hover ? T.fg : T.muted;
+                        font-family: T.mono;
+                        font-size: T.fs-sm;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    if AppState.has-upstream && (AppState.ahead > 0 || AppState.behind > 0): Text {
+                        text: (AppState.ahead > 0 ? "↑" + AppState.ahead + " " : "") + (AppState.behind > 0 ? "↓" + AppState.behind : "");
+                        color: T.brand;
+                        font-size: T.fs-sm;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                    }
+                    if AppState.has-upstream: Text {
+                        text: "→ " + AppState.upstream;
+                        color: T.subtle;
+                        font-size: T.fs-xs;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    if AppState.stash-count > 0: VerticalLayout {
+                        alignment: center;
+                        Chip { text: AppState.stash-count + " stashed"; tone: T.purple; }
+                    }
+                }
+            }
+        }
+
+        VerticalLayout {
+            alignment: center;
+            ToolbarButton {
+                icon: @image-url("icons/fetch.svg");
+                title: "Fetch";
+                subtitle: AppState.remote == "" ? "No remote" : AppState.last-fetched != "" ? "Fetched " + AppState.last-fetched : AppState.remote;
+                enabled: AppState.remote != "" && !AppState.busy;
+                clicked => { AppState.fetch(); }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            ToolbarButton {
+                icon: @image-url("icons/pull.svg");
+                title: "Pull";
+                subtitle: AppState.has-upstream ? (AppState.behind > 0 ? AppState.behind + " incoming" : "Up to date") : "No upstream";
+                badge: AppState.behind > 0 ? AppState.behind : "";
+                emphasize: AppState.behind > 0;
+                enabled: AppState.has-upstream && !AppState.busy;
+                clicked => { AppState.pull(); }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            ToolbarButton {
+                icon: @image-url("icons/push.svg");
+                title: AppState.has-upstream ? "Push" : "Publish";
+                subtitle: AppState.has-upstream ? (AppState.ahead > 0 ? AppState.ahead + " outgoing" : "Nothing to push") : AppState.remote == "" ? "No remote" : "to " + AppState.remote;
+                badge: AppState.ahead > 0 ? AppState.ahead : "";
+                emphasize: AppState.ahead > 0 || (!AppState.has-upstream && AppState.remote != "");
+                enabled: AppState.remote != "" && !AppState.busy && !AppState.detached && !AppState.unborn;
+                clicked => { AppState.push(); }
+            }
+        }
+
+        VDivider {
+            height: 28px;
+            y: (parent.height - 28px) / 2;
+        }
+
+        VerticalLayout {
+            alignment: center;
+            HorizontalLayout {
+                spacing: 2px;
+                padding-left: 6px;
+                IconButton {
+                    icon: @image-url("icons/terminal.svg");
+                    label: "Open in terminal (Ctrl+`)";
+                    clicked => { AppState.open-terminal(); }
+                }
+                IconButton {
+                    icon: @image-url("icons/folder.svg");
+                    label: "Show in file manager";
+                    clicked => { AppState.open-in-explorer(); }
+                }
+                if AppState.github-slug != "": IconButton {
+                    icon: @image-url("icons/external.svg");
+                    label: "Open on GitHub";
+                    clicked => { AppState.open-on-github(); }
+                }
+                if AppState.github-slug != "": IconButton {
+                    icon: @image-url("icons/pr.svg");
+                    label: "Create pull request";
+                    enabled: !AppState.detached && !AppState.unborn;
+                    clicked => { AppState.create-pr(); }
+                }
+            }
+        }
+    }
+
+    HDivider {
+        y: parent.height - 1px;
+        width: parent.width;
+    }
+}
+
+export component TabsBar inherits Rectangle {
+    height: 40px;
+    background: T.bg;
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 2px;
+        TabButton {
+            title: "Changes";
+            icon: @image-url("icons/changes.svg");
+            active: AppState.tab == 0;
+            enabled: AppState.has-repo;
+            count: AppState.staged-count + AppState.unstaged-count;
+            clicked => { AppState.tab = 0; AppState.tab-changed(0); }
+        }
+        TabButton {
+            title: "History";
+            icon: @image-url("icons/clock.svg");
+            active: AppState.tab == 1;
+            enabled: AppState.has-repo;
+            clicked => { AppState.tab = 1; AppState.tab-changed(1); }
+        }
+        TabButton {
+            title: "Branches";
+            icon: @image-url("icons/branch.svg");
+            active: AppState.tab == 2;
+            enabled: AppState.has-repo;
+            clicked => { AppState.tab = 2; AppState.tab-changed(2); }
+        }
+        TabButton {
+            title: "GitHub";
+            icon: @image-url("icons/cloud.svg");
+            active: AppState.tab == 3;
+            clicked => { AppState.tab = 3; AppState.tab-changed(3); }
+        }
+        Spacer { }
+        if AppState.has-repo: VerticalLayout {
+            alignment: center;
+            IconButton {
+                icon: @image-url("icons/fetch.svg");
+                label: "Refresh (F5)";
+                icon-size: 14px;
+                clicked => { AppState.refresh(); }
+            }
+        }
+    }
+
+    HDivider {
+        y: parent.height - 1px;
+        width: parent.width;
+    }
+}
+
+export component StatusBar inherits Rectangle {
+    height: 28px;
+    background: T.surface;
+
+    HDivider {
+        y: 0;
+        width: parent.width;
+    }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 10px;
+
+        if AppState.busy: HorizontalLayout {
+            spacing: 8px;
+            horizontal-stretch: 1;
+            VerticalLayout {
+                alignment: center;
+                Spinner {
+                    indeterminate: true;
+                    width: 14px;
+                    height: 14px;
+                }
+            }
+            Text {
+                text: AppState.busy-text;
+                color: T.fg;
+                font-size: T.fs-sm;
+                vertical-alignment: center;
+                overflow: elide;
+                horizontal-stretch: 1;
+            }
+            if AppState.busy-progress >= 0: VerticalLayout {
+                alignment: center;
+                ProgressIndicator {
+                    width: 140px;
+                    height: 4px;
+                    progress: AppState.busy-progress;
+                }
+            }
+            if AppState.busy-cancellable: cancel-ta := TouchArea {
+                width: cancel-text.preferred-width + 8px;
+                mouse-cursor: MouseCursor.pointer;
+                clicked => { AppState.cancel-op(); }
+                cancel-text := Text {
+                    text: "Cancel";
+                    color: cancel-ta.has-hover ? T.red : T.accent;
+                    font-size: T.fs-sm;
+                    font-weight: 600;
+                }
+            }
+        }
+
+        if !AppState.busy: status-ta := TouchArea {
+            horizontal-stretch: 1;
+            mouse-cursor: AppState.status-error ? MouseCursor.pointer : MouseCursor.default;
+            clicked => {
+                if AppState.status-error {
+                    AppState.show-dialog("error");
+                }
+            }
+            HorizontalLayout {
+                spacing: 6px;
+                if AppState.status-error: VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: 8px;
+                        height: 8px;
+                        border-radius: 4px;
+                        background: T.red;
+                    }
+                }
+                Text {
+                    text: AppState.status-text + (AppState.status-error ? "  — click for details" : "");
+                    color: AppState.status-error ? T.red : T.muted;
+                    font-size: T.fs-sm;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 6px;
+            VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 7px;
+                    height: 7px;
+                    border-radius: 3.5px;
+                    background: AppState.gh-signed-in ? T.green : T.subtle;
+                }
+            }
+            Text {
+                text: AppState.gh-signed-in ? "GitHub · " + AppState.gh-login : "GitHub · not connected";
+                color: T.subtle;
+                font-size: T.fs-sm;
+                vertical-alignment: center;
+            }
+        }
+    }
+}
