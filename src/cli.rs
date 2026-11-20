@@ -56,7 +56,11 @@ pub async fn git(cwd: Option<&Path>, args: &[String], opts: Opts) -> Result<Outp
         .stdin(if opts.stdin.is_some() { Stdio::piped() } else { Stdio::null() })
         // Never block on a terminal prompt we can't show; GUI credential managers still work.
         .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GCM_INTERACTIVE", "auto");
+        .env("GCM_INTERACTIVE", "auto")
+        // Never open an editor nobody can see (also overrides a repo's core.editor);
+        // Git treats ":" as "keep the prepared message".
+        .env("GIT_EDITOR", ":")
+        .env("GIT_SEQUENCE_EDITOR", ":");
     if opts.literal_pathspecs {
         cmd.env("GIT_LITERAL_PATHSPECS", "1");
     }

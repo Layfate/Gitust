@@ -250,6 +250,111 @@ pub async fn pull(root: &Path, mode: PullMode, opts: Opts) -> Result<cli::Output
     git_ok(Some(root), &args, opts).await
 }
 
+/// The Git command family for a repository state label from [`git::summary`].
+fn sequencer(state: &str) -> Option<&'static str> {
+    Some(match state {
+        "Merging" => "merge",
+        "Rebasing" => "rebase",
+        "Cherry-picking" => "cherry-pick",
+        "Reverting" => "revert",
+        "Applying patches" => "am",
+        _ => return None,
+    })
+}
+
+/// Abandons the merge/rebase/cherry-pick/revert in progress, restoring the
+/// branch to how it was before it started.
+pub async fn abort_operation(root: &Path, state: &str, opts: Opts) -> Result<()> {
+    let cmd = sequencer(state).ok_or_else(|| anyhow!("Nothing to abort"))?;
+    git_ok(Some(root), &[cmd, "--abort"], opts).await.map(drop)
+}
+
+/// Continues a rebase/cherry-pick/revert after conflicts were resolved and
+/// staged. (A merge is continued by committing.)
+pub async fn continue_operation(root: &Path, state: &str, opts: Opts) -> Result<()> {
+    match sequencer(state) {
+        Some(cmd @ ("rebase" | "cherry-pick" | "revert" | "am")) => {
+            git_ok(Some(root), &[cmd, "--continue"], opts).await.map(drop)
+        }
+        Some(_) => bail!("Commit to finish the merge."),
+        None => bail!("Nothing to continue"),
+    }
+}
+
+fn full_sha(id: &str) -> Result<&str> {
+    if id.len() >= 7 && id.len() <= 64 && id.chars().all(|c| c.is_ascii_hexdigit()) {
+        Ok(id)
+    } else {
+        bail!("'{id}' isn't a commit id")
+    }
+}
+
+/// Applies one commit's changes on top of the current branch as a new commit.
+pub async fn cherry_pick(root: &Path, id: &str, opts: Opts) -> Result<()> {
+    git_ok(Some(root), &["cherry-pick", full_sha(id)?], opts).await.map(drop)
+}
+
+/// Creates a tag on `target`; annotated when `message` isn't empty.
+pub async fn create_tag(root: &Path, name: &str, target: &str, message: &str, mut opts: Opts) -> Result<()> {
+    if !git::valid_tag_name(name) {
+        bail!("'{name}' isn't a valid tag name");
+    }
+    let target = full_sha(target)?;
+    if message.trim().is_empty() {
+        git_ok(Some(root), &["tag", name, target], opts).await.map(drop)
+    } else {
+        opts.stdin = Some(message.trim().as_bytes().to_vec());
+        git_ok(Some(root), &["tag", "-a", "--cleanup=whitespace", "-F", "-", name, target], opts).await.map(drop)
+    }
+}
+
+pub async fn delete_tag(root: &Path, name: &str, opts: Opts) -> Result<()> {
+    if !git::valid_tag_name(name) {
+        bail!("'{name}' isn't a valid tag name");
+    }
+    git_ok(Some(root), &["tag", "-d", name], opts).await.map(drop)
+}
+
+/// Publishes one tag (never all of them, never with force).
+pub async fn push_tag(root: &Path, remote: &str, name: &str, opts: Opts) -> Result<()> {
+    if !git::valid_tag_name(name) || remote.starts_with('-') {
+        bail!("Invalid tag or remote name");
+    }
+    let refspec = format!("refs/tags/{name}:refs/tags/{name}");
+    git_ok(Some(root), &["push", "--progress", remote, &refspec], opts).await.map(drop)
+}
+
+pub async fn rename_branch(root: &Path, old: &str, new: &str, opts: Opts) -> Result<()> {
+    if !git::valid_branch_name(old) || !git::valid_branch_name(new) {
+        bail!("'{new}' isn't a valid branch name");
+    }
+    // -m (not -M): refuses to overwrite an existing branch.
+    git_ok(Some(root), &["branch", "-m", old, new], opts).await.map(drop)
+}
+
+/// Removes the last commit but keeps everything it changed staged, so it can
+/// be edited and committed again. Nothing in the working tree changes.
+pub async fn undo_last_commit(root: &Path, opts: Opts) -> Result<()> {
+    git_ok(Some(root), &["reset", "--soft", "HEAD~1"], opts).await.map(drop)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StashAction {
+    Apply,
+    Pop,
+    Drop,
+}
+
+pub async fn stash_action(root: &Path, index: usize, action: StashAction, opts: Opts) -> Result<()> {
+    let verb = match action {
+        StashAction::Apply => "apply",
+        StashAction::Pop => "pop",
+        StashAction::Drop => "drop",
+    };
+    let stash = format!("stash@{{{index}}}");
+    git_ok(Some(root), &["stash", verb, &stash], opts).await.map(drop)
+}
+
 /// Whether a failed pull stopped because the branches diverged and Git wants a strategy.
 pub fn is_divergence(e: &anyhow::Error) -> bool {
     e.downcast_ref::<GitFailure>().is_some_and(|g| {
@@ -1066,6 +1171,160 @@ mod tests {
         }
         // Ordinary settings are not flagged.
         assert!(!has("user.name") && !has("apply.whitespace"), "{found:?}");
+    }
+
+    // ───────────── history editing: abort/continue, cherry-pick, tags, undo, stashes ─────────────
+
+    #[test]
+    fn abort_merge_restores_branch() {
+        let (_d, root) = repo();
+        conflicted(&root, "mine\n", Some("theirs\n"));
+        let head = run(&root, &["rev-parse", "HEAD"]);
+        let out = std::process::Command::new("git").args(["merge", "theirs"]).current_dir(&root).output().unwrap();
+        assert!(!out.status.success());
+        let state = git::summary(&git::open(&root).unwrap()).unwrap().state;
+        assert_eq!(state, "Merging");
+        rt().block_on(abort_operation(&root, &state, Opts::default())).unwrap();
+        let s = git::summary(&git::open(&root).unwrap()).unwrap();
+        assert_eq!(s.state, "");
+        assert_eq!(run(&root, &["rev-parse", "HEAD"]), head);
+        assert_eq!(fs::read(root.join("c.txt")).unwrap(), b"mine\n");
+    }
+
+    #[test]
+    fn continue_rebase_after_resolving_without_an_editor() {
+        let (_d, root) = repo();
+        // Hostile editor setting must never run (GIT_EDITOR overrides it).
+        run(&root, &["config", "core.editor", "exit 1"]);
+        conflicted(&root, "mine\n", Some("theirs\n"));
+        let out = std::process::Command::new("git").args(["rebase", "theirs"]).current_dir(&root).output().unwrap();
+        assert!(!out.status.success());
+        let rt = rt();
+        rt.block_on(take_side(&root, "c.txt", true, true, Opts::default())).unwrap();
+        rt.block_on(continue_operation(&root, "Rebasing", Opts::default())).unwrap();
+        let s = git::summary(&git::open(&root).unwrap()).unwrap();
+        assert_eq!(s.state, "");
+        assert_eq!(fs::read(root.join("c.txt")).unwrap(), b"mine\n");
+        assert_eq!(run(&root, &["log", "-1", "--format=%s"]).trim(), "mine");
+    }
+
+    #[test]
+    fn cherry_pick_and_validation() {
+        let (_d, root) = repo();
+        fs::write(root.join("a.txt"), "a\n").unwrap();
+        run(&root, &["add", "a.txt"]);
+        run(&root, &["commit", "-qm", "base"]);
+        run(&root, &["switch", "-qc", "side"]);
+        fs::write(root.join("b.txt"), "b\n").unwrap();
+        run(&root, &["add", "b.txt"]);
+        run(&root, &["commit", "-qm", "add b"]);
+        let id = run(&root, &["rev-parse", "HEAD"]).trim().to_string();
+        run(&root, &["switch", "-q", "main"]);
+        let rt = rt();
+        rt.block_on(cherry_pick(&root, &id, Opts::default())).unwrap();
+        assert_eq!(fs::read(root.join("b.txt")).unwrap(), b"b\n");
+        assert_eq!(run(&root, &["log", "-1", "--format=%s"]).trim(), "add b");
+        assert!(rt.block_on(cherry_pick(&root, "--abort", Opts::default())).is_err());
+        assert!(rt.block_on(cherry_pick(&root, "HEAD~1", Opts::default())).is_err());
+    }
+
+    #[test]
+    fn tags_create_list_delete() {
+        let (_d, root) = repo();
+        fs::write(root.join("a.txt"), "a\n").unwrap();
+        run(&root, &["add", "a.txt"]);
+        run(&root, &["commit", "-qm", "base"]);
+        let id = run(&root, &["rev-parse", "HEAD"]).trim().to_string();
+        let rt = rt();
+        rt.block_on(create_tag(&root, "v1.0.0", &id, "", Opts::default())).unwrap();
+        rt.block_on(create_tag(&root, "v1.1.0", &id, "#1 release notes\n\nmore", Opts::default())).unwrap();
+        let tags = git::tags(&git::open(&root).unwrap()).unwrap();
+        let names: Vec<&str> = tags.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"v1.0.0") && names.contains(&"v1.1.0"));
+        let annotated = tags.iter().find(|t| t.name == "v1.1.0").unwrap();
+        assert_eq!(annotated.summary, "#1 release notes");
+        assert_eq!(tags.iter().find(|t| t.name == "v1.0.0").unwrap().summary, "base");
+        assert!(rt.block_on(create_tag(&root, "-f", &id, "", Opts::default())).is_err());
+        assert!(rt.block_on(create_tag(&root, "bad..name", &id, "", Opts::default())).is_err());
+        assert!(rt.block_on(create_tag(&root, "v1.0.0", &id, "", Opts::default())).is_err(), "no overwrite");
+        rt.block_on(delete_tag(&root, "v1.0.0", Opts::default())).unwrap();
+        assert_eq!(git::tags(&git::open(&root).unwrap()).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn push_tag_publishes_only_that_tag() {
+        let (_r, remote) = repo();
+        run(&remote, &["config", "receive.denyCurrentBranch", "ignore"]);
+        let (_d, root) = repo();
+        fs::write(root.join("a.txt"), "a\n").unwrap();
+        run(&root, &["add", "a.txt"]);
+        run(&root, &["commit", "-qm", "base"]);
+        run(&root, &["remote", "add", "origin", remote.to_str().unwrap()]);
+        run(&root, &["tag", "keep-local"]);
+        run(&root, &["tag", "share-me"]);
+        rt().block_on(push_tag(&root, "origin", "share-me", Opts::default())).unwrap();
+        let remote_tags = run(&remote, &["tag"]);
+        assert_eq!(remote_tags.trim(), "share-me");
+    }
+
+    #[test]
+    fn rename_branch_refuses_to_overwrite() {
+        let (_d, root) = repo();
+        fs::write(root.join("a.txt"), "a\n").unwrap();
+        run(&root, &["add", "a.txt"]);
+        run(&root, &["commit", "-qm", "base"]);
+        run(&root, &["branch", "old"]);
+        run(&root, &["branch", "taken"]);
+        let rt = rt();
+        assert!(rt.block_on(rename_branch(&root, "old", "taken", Opts::default())).is_err());
+        rt.block_on(rename_branch(&root, "old", "feature/new", Opts::default())).unwrap();
+        let branches = run(&root, &["branch", "--format=%(refname:short)"]);
+        assert!(branches.contains("feature/new") && !branches.lines().any(|b| b == "old"));
+        assert!(rt.block_on(rename_branch(&root, "taken", "-x", Opts::default())).is_err());
+    }
+
+    #[test]
+    fn undo_last_commit_keeps_changes_staged() {
+        let (_d, root) = repo();
+        fs::write(root.join("a.txt"), "1\n").unwrap();
+        run(&root, &["add", "a.txt"]);
+        run(&root, &["commit", "-qm", "first"]);
+        fs::write(root.join("a.txt"), "2\n").unwrap();
+        fs::write(root.join("b.txt"), "new\n").unwrap();
+        run(&root, &["add", "-A"]);
+        run(&root, &["commit", "-qm", "second"]);
+        fs::write(root.join("a.txt"), "3 unstaged\n").unwrap();
+        assert!(git::head_has_parent(&git::open(&root).unwrap()));
+        rt().block_on(undo_last_commit(&root, Opts::default())).unwrap();
+        assert_eq!(run(&root, &["log", "-1", "--format=%s"]).trim(), "first");
+        assert_eq!(index_blob(&root, "a.txt").unwrap(), b"2\n");
+        assert_eq!(index_blob(&root, "b.txt").unwrap(), b"new\n");
+        assert_eq!(fs::read(root.join("a.txt")).unwrap(), b"3 unstaged\n", "working tree untouched");
+        assert!(!git::head_has_parent(&git::open(&root).unwrap()), "can't undo the root commit");
+    }
+
+    #[test]
+    fn stash_list_apply_drop() {
+        let (_d, root) = repo();
+        fs::write(root.join("a.txt"), "base\n").unwrap();
+        run(&root, &["add", "a.txt"]);
+        run(&root, &["commit", "-qm", "base"]);
+        for v in ["one", "two"] {
+            fs::write(root.join("a.txt"), format!("{v}\n")).unwrap();
+            run(&root, &["stash", "push", "-m", v]);
+        }
+        let list = git::stashes(&mut git2::Repository::open(&root).unwrap()).unwrap();
+        assert_eq!(list.len(), 2);
+        assert!(list[0].message.contains("two") && list[1].message.contains("one"));
+        let rt = rt();
+        // Apply the older one; it stays in the list.
+        rt.block_on(stash_action(&root, 1, StashAction::Apply, Opts::default())).unwrap();
+        assert_eq!(fs::read(root.join("a.txt")).unwrap(), b"one\n");
+        assert_eq!(git::stashes(&mut git2::Repository::open(&root).unwrap()).unwrap().len(), 2);
+        rt.block_on(stash_action(&root, 0, StashAction::Drop, Opts::default())).unwrap();
+        let list = git::stashes(&mut git2::Repository::open(&root).unwrap()).unwrap();
+        assert_eq!(list.len(), 1);
+        assert!(list[0].message.contains("one"));
     }
 
     // ───────────── pulls ─────────────

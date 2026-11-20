@@ -785,6 +785,65 @@ pub fn commit_detail(repo: &Repository, id: &str) -> Result<CommitDetail> {
     })
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct TagInfo {
+    pub name: String,
+    /// Short SHA of the tagged commit.
+    pub target: String,
+    pub time: i64,
+    /// First line of an annotated tag's message, or the commit summary.
+    pub summary: String,
+}
+
+/// Tags, newest first.
+pub fn tags(repo: &Repository) -> Result<Vec<TagInfo>> {
+    let mut out = Vec::new();
+    let names = repo.tag_names(None)?;
+    for name in names.iter().flatten().flatten() {
+        let Ok(r) = repo.find_reference(&format!("refs/tags/{name}")) else { continue };
+        let Ok(commit) = r.peel_to_commit() else { continue };
+        let summary = r
+            .peel_to_tag()
+            .ok()
+            .and_then(|t| t.message().ok().flatten().map(|m| m.lines().next().unwrap_or("").to_string()))
+            .filter(|m| !m.is_empty())
+            .or_else(|| commit.summary().ok().flatten().map(str::to_string))
+            .unwrap_or_default();
+        out.push(TagInfo {
+            name: name.to_string(),
+            target: short(commit.id()),
+            time: commit.time().seconds(),
+            summary,
+        });
+    }
+    out.sort_by(|a, b| b.time.cmp(&a.time).then_with(|| b.name.cmp(&a.name)));
+    Ok(out)
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct StashInfo {
+    pub index: usize,
+    pub message: String,
+}
+
+pub fn stashes(repo: &mut Repository) -> Result<Vec<StashInfo>> {
+    let mut out = Vec::new();
+    repo.stash_foreach(|index, message, _| {
+        out.push(StashInfo { index, message: message.to_string() });
+        true
+    })?;
+    Ok(out)
+}
+
+pub fn valid_tag_name(name: &str) -> bool {
+    !name.is_empty() && !name.starts_with('-') && git2::Reference::is_valid_name(&format!("refs/tags/{name}"))
+}
+
+/// Whether HEAD can be undone: it exists and has a parent (a root commit can't be soft-reset).
+pub fn head_has_parent(repo: &Repository) -> bool {
+    repo.head().ok().and_then(|h| h.peel_to_commit().ok()).is_some_and(|c| c.parent_count() > 0)
+}
+
 pub fn head_message(repo: &Repository) -> Option<String> {
     let c = repo.head().ok()?.peel_to_commit().ok()?;
     c.message().ok().map(str::to_string)
