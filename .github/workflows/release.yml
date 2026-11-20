@@ -21,7 +21,7 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
@@ -51,7 +51,7 @@ jobs:
           # WiX also writes a debug database next to the MSI; it isn't for users.
           Remove-Item dist/*.wixpdb -ErrorAction SilentlyContinue
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows
           path: dist/*
@@ -61,7 +61,7 @@ jobs:
   linux:
     runs-on: ubuntu-22.04 # older glibc, so the binary runs on more distributions
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
@@ -97,7 +97,7 @@ jobs:
           mv Gitust-*.AppImage "dist/Gitust-$v-x86_64.AppImage"
           ls -la dist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: linux
           path: dist/*
@@ -105,7 +105,7 @@ jobs:
   macos:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin, x86_64-apple-darwin
@@ -137,7 +137,7 @@ jobs:
           hdiutil create -volname "Gitust $v" -srcfolder dmg -ov -format UDZO "dist/Gitust-$v-macos-universal.dmg"
           ls -la dist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: macos
           path: dist/*
@@ -146,7 +146,7 @@ jobs:
     needs: [windows, linux, macos]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
@@ -154,7 +154,7 @@ jobs:
       - name: Checksums
         run: cd dist && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: gitust-all
           path: dist/*
@@ -162,7 +162,7 @@ jobs:
       # A draft, so you can check it before anyone sees it.
       - name: Draft GitHub release
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: dist/*
           draft: true
