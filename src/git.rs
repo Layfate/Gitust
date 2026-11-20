@@ -109,6 +109,7 @@ pub struct CommitInfo {
     pub refs: Vec<String>,
     pub unpushed: bool,
     pub merge: bool,
+    pub parents: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -730,8 +731,9 @@ pub fn history(repo: &Repository, skip: usize, limit: usize) -> Result<Vec<Commi
     if walk.push_head().is_err() {
         return Ok(Vec::new()); // unborn branch
     }
-    // TIME (not TOPOLOGICAL) keeps the walk incremental on huge repositories.
-    walk.set_sorting(Sort::TIME)?;
+    // Children always before parents (the graph depends on it), newest first
+    // among unrelated commits. Rebases and clock skew break pure time order.
+    walk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)?;
     let decorations = decorations(repo);
     let unpushed = unpushed(repo);
     let mut out = Vec::with_capacity(limit);
@@ -747,6 +749,7 @@ pub fn history(repo: &Repository, skip: usize, limit: usize) -> Result<Vec<Commi
             refs: decorations.get(&oid).cloned().unwrap_or_default(),
             unpushed: unpushed.contains(&oid),
             merge: c.parent_count() > 1,
+            parents: c.parent_ids().map(|p| p.to_string()).collect(),
         });
     }
     Ok(out)

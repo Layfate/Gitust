@@ -33,6 +33,13 @@ export struct DiffLine {
     segs: [Seg],
 }
 
+// One coloured part of a History row's graph: SVG path commands in a
+// viewbox of graph-lane-width per lane × 56 per row.
+export struct GraphPath {
+    d: string,
+    color: int,
+}
+
 export struct CommitItem {
     id: string,
     short-id: string,
@@ -42,6 +49,9 @@ export struct CommitItem {
     refs: string,
     unpushed: bool,
     merge: bool,
+    // Graph: lane of this commit's dot and the lines through the row.
+    node: int,
+    paths: [GraphPath],
 }
 
 export struct BranchItem {
@@ -146,6 +156,8 @@ export global AppState {
 
     // ---- history ----
     in-out property <[CommitItem]> commits;
+    // Lanes in the History graph (0 while filtering, when it's hidden).
+    in-out property <int> graph-lanes;
     in-out property <bool> commits-loading;
     in-out property <bool> commits-exhausted;
     in-out property <string> selected-commit;

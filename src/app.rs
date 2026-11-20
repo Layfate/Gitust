@@ -13,7 +13,8 @@ use crate::store::Store;
 use crate::util;
 use crate::watch::{self, RepoWatcher};
 use crate::{
-    AppState, BranchItem, ChangeRow, CommitItem, DiffLine, GhItem, GhRepoItem, MainWindow, PaletteItem, RepoItem, Seg,
+    AppState, BranchItem, ChangeRow, CommitItem, DiffLine, GhItem, GhRepoItem, GraphPath, MainWindow, PaletteItem,
+    RepoItem, Seg,
 };
 use anyhow::{Result, anyhow};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel, Weak};
@@ -1459,29 +1460,49 @@ impl App {
     }
 
     fn push_commits(&self) {
-        let items: Vec<CommitItem> = {
+        let now = util::now();
+        let items: Vec<(git::CommitInfo, i32, GraphPaths)> = {
             let s = self.st();
-            let now = util::now();
-            s.commits
+            // The graph only makes sense for the unfiltered list.
+            let (graph, lanes) = if s.history_query.trim().is_empty() {
+                let input: Vec<(&str, Vec<&str>)> =
+                    s.commits.iter().map(|c| (c.id.as_str(), c.parents.iter().map(String::as_str).collect())).collect();
+                let (rows, width) = crate::graph::layout(&input);
+                (rows, width.min(MAX_GRAPH_LANES))
+            } else {
+                (Vec::new(), 0)
+            };
+            let lanes_i = lanes as i32;
+            let items = s
+                .commits
                 .iter()
-                .filter(|c| commit_matches(c, &s.history_query))
-                .map(|c| CommitItem {
-                    id: sh(c.id.clone()),
-                    short_id: sh(c.id[..7.min(c.id.len())].to_string()),
-                    summary: sh(c.summary.clone()),
-                    author: sh(c.author.clone()),
-                    when: sh(util::relative_time(c.time, now)),
-                    refs: sh(match c.refs.len() {
-                        0 => String::new(),
-                        1 | 2 => c.refs.join(", "),
-                        n => format!("{}, {} +{}", c.refs[0], c.refs[1], n - 2),
-                    }),
-                    unpushed: c.unpushed,
-                    merge: c.merge,
+                .enumerate()
+                .filter(|(_, c)| commit_matches(c, &s.history_query))
+                .map(|(i, c)| {
+                    let (node, paths) = match graph.get(i) {
+                        Some(row) => (row.node as i32, graph_paths(row, lanes)),
+                        None => (0, Vec::new()),
+                    };
+                    (c.clone(), node, paths)
                 })
-                .collect()
+                .collect();
+            self.ui(move |_, st| st.set_graph_lanes(lanes_i));
+            items
         };
-        self.ui(move |_, st| set_model!(st, get_commits, set_commits, items));
+        self.ui(move |_, st| {
+            let items: Vec<CommitItem> = items
+                .into_iter()
+                .map(|(c, node, paths)| {
+                    let mut item = commit_item(&c, now, node);
+                    item.paths = ModelRc::new(VecModel::from(
+                        paths.into_iter().map(|(d, color)| GraphPath { d: d.into(), color }).collect::<Vec<_>>(),
+                    ));
+                    item
+                })
+                .collect();
+            // Rows hold models (compared by identity), so replace the data in place.
+            set_model!(st, get_commits, set_commits, items)
+        });
     }
 
     fn load_branches(self: &Arc<Self>) {
@@ -2522,6 +2543,52 @@ impl App {
 }
 
 // ───────────────────────────── free helpers ─────────────────────────────
+
+/// Lanes beyond this are clipped; very wide graphs are rare and unreadable anyway.
+const MAX_GRAPH_LANES: usize = 8;
+/// Must match the History row: lane width × row height, in logical px.
+const GRAPH_LANE_W: f32 = 14.0;
+const GRAPH_ROW_H: f32 = 56.0;
+
+/// SVG path commands and lane colour, one entry per colour in a row.
+type GraphPaths = Vec<(String, i32)>;
+
+/// One SVG path per colour for a row's graph edges.
+fn graph_paths(row: &crate::graph::Row, lanes: usize) -> GraphPaths {
+    let mut colors: Vec<u16> = row.edges.iter().map(|e| e.color).collect();
+    colors.sort_unstable();
+    colors.dedup();
+    colors
+        .into_iter()
+        .filter_map(|color| {
+            let edges: Vec<&crate::graph::Edge> = row
+                .edges
+                .iter()
+                .filter(|e| e.color == color && (e.from as usize) < lanes && (e.to as usize) < lanes)
+                .collect();
+            (!edges.is_empty()).then(|| (crate::graph::path(&edges, GRAPH_LANE_W, GRAPH_ROW_H), color as i32))
+        })
+        .collect()
+}
+
+fn commit_item(c: &git::CommitInfo, now: i64, node: i32) -> CommitItem {
+    CommitItem {
+        id: sh(c.id.clone()),
+        short_id: sh(c.id[..7.min(c.id.len())].to_string()),
+        summary: sh(c.summary.clone()),
+        author: sh(c.author.clone()),
+        when: sh(util::relative_time(c.time, now)),
+        refs: sh(match c.refs.len() {
+            0 => String::new(),
+            1 | 2 => c.refs.join(", "),
+            n => format!("{}, {} +{}", c.refs[0], c.refs[1], n - 2),
+        }),
+        unpushed: c.unpushed,
+        merge: c.merge,
+        node,
+        paths: ModelRc::default(),
+    }
+}
 
 fn read_repo(path: &Path) -> Result<(git::Summary, Vec<String>)> {
     let repo = git::open(path)?;

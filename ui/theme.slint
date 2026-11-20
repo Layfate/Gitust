@@ -49,6 +49,16 @@ export global T {
     out property <length> fs-lg: 15px;
     out property <length> fs-xl: 20px;
 
+    // History graph lanes (cycled; lane identity matters less than continuity).
+    public pure function lane-color(i: int) -> color {
+        if Math.mod(i, 6) == 0 { return brand; }
+        if Math.mod(i, 6) == 1 { return accent; }
+        if Math.mod(i, 6) == 2 { return purple; }
+        if Math.mod(i, 6) == 3 { return green; }
+        if Math.mod(i, 6) == 4 { return yellow; }
+        return dark ? #f778ba : #bf3989;
+    }
+
     public pure function syn-color(tok: int) -> color {
         if tok == 1 { return syn-keyword; }
         if tok == 2 { return syn-type; }
