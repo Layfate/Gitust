@@ -117,7 +117,7 @@ component DiffRow inherits Rectangle {
                 clicked => { AppState.discard-hunk(root.index); }
             }
         }
-        Text {
+        if root.line.segs.length == 0: Text {
             text: root.line.text;
             color: k == 3 ? T.muted : k == 5 ? T.subtle : k == 6 ? T.red : T.fg;
             font-family: T.mono;
@@ -125,6 +125,25 @@ component DiffRow inherits Rectangle {
             font-italic: k == 5;
             vertical-alignment: center;
             horizontal-stretch: 1;
+        }
+        // Syntax-coloured runs; changed words get a stronger background.
+        if root.line.segs.length > 0: HorizontalLayout {
+            spacing: 0;
+            horizontal-stretch: 1;
+            for s in root.line.segs: Rectangle {
+                width: seg-text.preferred-width;
+                background: s.emph ? (k == 1 ? T.add-emph : T.del-emph) : transparent;
+                border-radius: 2px;
+                seg-text := Text {
+                    text: s.text;
+                    color: T.syn-color(s.tok);
+                    font-family: T.mono;
+                    font-size: 12px;
+                    font-italic: s.tok == 5;
+                    vertical-alignment: center;
+                }
+            }
+            Rectangle { horizontal-stretch: 1; }
         }
     }
 }

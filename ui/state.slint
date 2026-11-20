@@ -12,6 +12,14 @@ export struct ChangeRow {
     status: string,
 }
 
+// A run of a diff line: token class (0 plain, 1 keyword, 2 type, 3 string,
+// 4 number, 5 comment, 6 attribute, 7 function) and whether it's a changed word.
+export struct Seg {
+    text: string,
+    tok: int,
+    emph: bool,
+}
+
 export struct DiffLine {
     // 0 context, 1 add, 2 delete, 3 hunk, 4 file header, 5 note, 6 conflict marker, 7 ours, 8 theirs
     kind: int,
@@ -21,6 +29,8 @@ export struct DiffLine {
     // Line staging: this +/- row can be picked, and whether it is.
     selectable: bool,
     selected: bool,
+    // Empty: draw `text` plainly.
+    segs: [Seg],
 }
 
 export struct CommitItem {

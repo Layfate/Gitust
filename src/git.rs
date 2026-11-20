@@ -2,6 +2,7 @@
 //! and must run on a worker thread. Mutations that should honour hooks, filters
 //! (LFS, autocrlf) and signing go through the Git CLI instead (see `cli.rs`).
 
+use crate::highlight::{self, Highlighter};
 use crate::patch;
 use crate::util;
 use anyhow::{Result, anyhow, bail};
@@ -76,10 +77,12 @@ pub struct Line {
     /// `(hunk, line within hunk)` for context/`+`/`-` rows: the key into
     /// [`patch::FileDiff`] used by line staging.
     pub pos: Option<(u32, u32)>,
+    /// Syntax-coloured runs with changed words marked; empty = plain text.
+    pub segs: Vec<highlight::Seg>,
 }
 
 fn note(text: &str) -> Line {
-    Line { kind: kind::NOTE, old_no: None, new_no: None, text: text.to_string(), tag: "", pos: None }
+    Line { kind: kind::NOTE, old_no: None, new_no: None, text: text.to_string(), tag: "", pos: None, segs: Vec::new() }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -335,6 +338,7 @@ pub fn file_diff_with_source(
     }
     let diff = change_diff(repo, change)?;
     let mut view = render(&diff, false)?;
+    decorate(&mut view.lines, Some(&change.path));
     // Any doubt about the file means no line staging, never a wrong patch.
     let source = line_source(repo, change, &diff, &view).ok().flatten();
     view.fingerprint = source.as_ref().map(patch::FileDiff::fingerprint);
@@ -511,7 +515,15 @@ fn render(diff: &git2::Diff<'_>, file_headers: bool) -> Result<DiffView> {
                     Delta::Typechange => ("type changed", path.clone()),
                     _ => ("modified", path.clone()),
                 };
-                v.lines.push(Line { kind: kind::FILE, old_no: None, new_no: None, text, tag: label, pos: None });
+                v.lines.push(Line {
+                    kind: kind::FILE,
+                    old_no: None,
+                    new_no: None,
+                    text,
+                    tag: label,
+                    pos: None,
+                    segs: Vec::new(),
+                });
                 current_file = Some(path);
                 hunk_no = u32::MAX;
             }
@@ -542,7 +554,15 @@ fn render(diff: &git2::Diff<'_>, file_headers: bool) -> Result<DiffView> {
             line_no += 1;
             (hunk_no, line_no - 1)
         });
-        v.lines.push(Line { kind: k, old_no: line.old_lineno(), new_no: line.new_lineno(), text, tag: "", pos });
+        v.lines.push(Line {
+            kind: k,
+            old_no: line.old_lineno(),
+            new_no: line.new_lineno(),
+            text,
+            tag: "",
+            pos,
+            segs: Vec::new(),
+        });
         true
     });
     match result {
@@ -555,6 +575,69 @@ fn render(diff: &git2::Diff<'_>, file_headers: bool) -> Result<DiffView> {
         v.lines.clear();
     }
     Ok(v)
+}
+
+/// Adds syntax colouring and word-level change emphasis to rendered diff rows.
+/// `path` is the file of a single-file diff; multi-file diffs carry it in their
+/// FILE rows. Files in languages we don't know stay plain.
+fn decorate(lines: &mut [Line], path: Option<&str>) {
+    let mut lang = path.and_then(highlight::lang_for);
+    let (mut old_h, mut new_h) = (lang.map(Highlighter::new), lang.map(Highlighter::new));
+    let mut i = 0;
+    while i < lines.len() {
+        match lines[i].kind {
+            kind::FILE => {
+                let p = lines[i].text.rsplit(" → ").next().unwrap_or(&lines[i].text).to_string();
+                lang = highlight::lang_for(&p);
+                old_h = lang.map(Highlighter::new);
+                new_h = lang.map(Highlighter::new);
+                i += 1;
+            }
+            kind::HUNK => {
+                // A hunk may start anywhere; assume we're not inside a comment.
+                for h in [&mut old_h, &mut new_h].into_iter().flatten() {
+                    h.reset();
+                }
+                i += 1;
+            }
+            kind::CONTEXT => {
+                if let (Some(nh), Some(oh)) = (new_h.as_mut(), old_h.as_mut()) {
+                    let toks = nh.line(&lines[i].text);
+                    oh.line(&lines[i].text);
+                    lines[i].segs = highlight::segments(&lines[i].text, &toks, &[]);
+                }
+                i += 1;
+            }
+            kind::DEL | kind::ADD => {
+                // A run of deletions followed by the additions that replace them.
+                let del_start = i;
+                while i < lines.len() && lines[i].kind == kind::DEL {
+                    i += 1;
+                }
+                let add_start = i;
+                while i < lines.len() && lines[i].kind == kind::ADD {
+                    i += 1;
+                }
+                let (dels, adds) = (add_start - del_start, i - add_start);
+                let mut emph: Vec<Vec<(usize, usize)>> = vec![Vec::new(); i - del_start];
+                for k in 0..dels.min(adds) {
+                    let (d, a) = (del_start + k, add_start + k);
+                    if let Some((de, ae)) = highlight::changed_ranges(&lines[d].text, &lines[a].text) {
+                        emph[d - del_start] = de;
+                        emph[a - del_start] = ae;
+                    }
+                }
+                for (j, line) in lines[del_start..i].iter_mut().enumerate() {
+                    let h = if line.kind == kind::DEL { old_h.as_mut() } else { new_h.as_mut() };
+                    let toks = h.map(|h| h.line(&line.text)).unwrap_or_default();
+                    if !toks.is_empty() || !emph[j].is_empty() {
+                        line.segs = highlight::segments(&line.text, &toks, &emph[j]);
+                    }
+                }
+            }
+            _ => i += 1,
+        }
+    }
 }
 
 /// Working-tree view of a conflicted file with ours/theirs regions tinted.
@@ -594,7 +677,15 @@ fn conflict_view(path: &Path) -> Result<DiffView> {
             region
         };
         v.max_chars = v.max_chars.max(text.chars().count());
-        v.lines.push(Line { kind: k, old_no: None, new_no: Some(i as u32 + 1), text, tag: "", pos: None });
+        v.lines.push(Line {
+            kind: k,
+            old_no: None,
+            new_no: Some(i as u32 + 1),
+            text,
+            tag: "",
+            pos: None,
+            segs: Vec::new(),
+        });
     }
     Ok(v)
 }
@@ -683,7 +774,11 @@ pub fn commit_detail(repo: &Repository, id: &str) -> Result<CommitDetail> {
         time: author.when().seconds(),
         offset_minutes: author.when().offset_minutes(),
         parents: c.parent_ids().map(short).collect(),
-        diff: render(&diff, true)?,
+        diff: {
+            let mut v = render(&diff, true)?;
+            decorate(&mut v.lines, None);
+            v
+        },
     })
 }
 

@@ -13,7 +13,7 @@ use crate::store::Store;
 use crate::util;
 use crate::watch::{self, RepoWatcher};
 use crate::{
-    AppState, BranchItem, ChangeRow, CommitItem, DiffLine, GhItem, GhRepoItem, MainWindow, PaletteItem, RepoItem,
+    AppState, BranchItem, ChangeRow, CommitItem, DiffLine, GhItem, GhRepoItem, MainWindow, PaletteItem, RepoItem, Seg,
 };
 use anyhow::{Result, anyhow};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel, Weak};
@@ -29,9 +29,44 @@ const GH_STALE_SECS: i64 = 180;
 
 // ───────────────────────────── state ─────────────────────────────
 
+/// One diff row in thread-safe form; becomes a Slint `DiffLine` on the UI thread
+/// (Slint models are single-threaded, so the payload can't hold them).
+#[derive(Clone, Default)]
+struct Row {
+    kind: i32,
+    old_no: SharedString,
+    new_no: SharedString,
+    text: SharedString,
+    selectable: bool,
+    segs: Vec<crate::highlight::Seg>,
+}
+
+impl Row {
+    fn into_line(self) -> DiffLine {
+        DiffLine {
+            kind: self.kind,
+            old_no: self.old_no,
+            new_no: self.new_no,
+            text: self.text,
+            selectable: self.selectable,
+            selected: false,
+            segs: if self.segs.is_empty() {
+                ModelRc::default()
+            } else {
+                ModelRc::new(VecModel::from(
+                    self.segs
+                        .into_iter()
+                        .map(|g| Seg { text: g.text.into(), tok: g.tok as i32, emph: g.emph })
+                        .collect::<Vec<_>>(),
+                ))
+            },
+        }
+    }
+}
+
 #[derive(Clone, Default)]
 struct DiffPayload {
-    lines: Vec<DiffLine>,
+    lines: Vec<Row>,
     title: String,
     dir: String,
     status: String,
@@ -58,12 +93,12 @@ impl DiffPayload {
             lines: v
                 .lines
                 .into_iter()
-                .map(|l| DiffLine {
+                .map(|l| Row {
                     kind: l.kind,
                     old_no: if l.kind == git::kind::FILE { l.tag.into() } else { num(l.old_no) },
                     new_no: num(l.new_no),
                     selectable: selectable && l.pos.is_some() && (l.kind == git::kind::ADD || l.kind == git::kind::DEL),
-                    selected: false,
+                    segs: l.segs,
                     text: l.text.into(),
                 })
                 .collect(),
@@ -1066,7 +1101,8 @@ impl App {
                 st.set_diff_selected_count(0);
                 st.set_diff_anchor(-1);
                 // Fresh model per diff: scroll resets to the top, which is what you want for a new file.
-                st.set_diff(ModelRc::new(VecModel::from(p.lines)));
+                let lines: Vec<DiffLine> = p.lines.into_iter().map(Row::into_line).collect();
+                st.set_diff(ModelRc::new(VecModel::from(lines)));
             }
         });
     }

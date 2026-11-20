@@ -1,12 +1,12 @@
 import { Palette } from "std-widgets.slint";
 import { T } from "theme.slint";
-import { AppState, ChangeRow, DiffLine, CommitItem, BranchItem, RepoItem, GhRepoItem, GhItem, PaletteItem } from "state.slint";
+import { AppState, ChangeRow, DiffLine, Seg, CommitItem, BranchItem, RepoItem, GhRepoItem, GhItem, PaletteItem } from "state.slint";
 import { VDivider } from "widgets.slint";
 import { Sidebar, RepoHeader, TabsBar, StatusBar, TrustBanner } from "chrome.slint";
 import { ChangesView, HistoryView, BranchesView, GitHubView, Welcome } from "views.slint";
 import { CloneDialog, NewBranchDialog, ConfirmDialog, ErrorDialog, SettingsDialog, CommandPalette, PullDivergedDialog, AboutDialog } from "dialogs.slint";
 
-export { AppState, T, ChangeRow, DiffLine, CommitItem, BranchItem, RepoItem, GhRepoItem, GhItem, PaletteItem }
+export { AppState, T, ChangeRow, DiffLine, Seg, CommitItem, BranchItem, RepoItem, GhRepoItem, GhItem, PaletteItem }
 
 export component MainWindow inherits Window {
     title: AppState.has-repo ? AppState.repo-name + " · " + AppState.branch + " — Gitust" : "Gitust";
