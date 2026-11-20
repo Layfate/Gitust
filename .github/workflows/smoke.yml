@@ -1,0 +1,80 @@
+name: Launch test
+
+# Starts the real app on each OS (a GUI session on macOS/Windows, Xvfb on
+# Linux), screenshots it and checks it logged a visible window. Catches builds
+# that compile but can't open a window (missing libraries, backend problems).
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  launch:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-22.04, macos-latest]
+    env:
+      GITUST_SMOKE_TEST: "8"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Linux libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev xvfb imagemagick libxkbcommon-x11-0
+
+      - name: Build
+        run: cargo build --release --locked
+
+      - name: Launch (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          export GITUST_DATA_DIR="$RUNNER_TEMP/data"
+          xvfb-run -s "-screen 0 1280x800x24" bash -c '
+            ./target/release/gitust . > out.txt 2>&1 & pid=$!
+            sleep 5; import -window root screenshot.png
+            wait $pid'
+          cat out.txt
+          grep -q "window visible = true" out.txt
+
+      - name: Launch (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          export GITUST_DATA_DIR="$RUNNER_TEMP/data"
+          ./target/release/gitust . > out.txt 2>&1 & pid=$!
+          sleep 5; screencapture -x screenshot.png
+          wait $pid
+          cat out.txt
+          grep -q "window visible = true" out.txt
+
+      - name: Launch (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:GITUST_DATA_DIR = "$env:RUNNER_TEMP\data"
+          $p = Start-Process -FilePath target\release\gitust.exe -ArgumentList "." -PassThru
+          Start-Sleep -Seconds 5
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+          [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+          $bmp.Save("screenshot.png")
+          $p.WaitForExit(30000) | Out-Null
+          # Release builds have no console; the result is in the log file.
+          $log = Get-Content "$env:RUNNER_TEMP\data\gitust.log" -Raw
+          $log
+          if ($log -notmatch "window visible = true") { exit 1 }
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: screenshot-${{ matrix.os }}
+          path: screenshot.png

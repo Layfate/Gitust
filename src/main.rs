@@ -58,6 +58,19 @@ fn main() -> anyhow::Result<()> {
     app.restore(&ui, initial);
 
     ui.show()?;
+    // CI launch check: prove the window opens and the event loop runs, then quit.
+    let smoke = std::env::var("GITUST_SMOKE_TEST").ok().and_then(|v| v.parse::<u64>().ok());
+    let _smoke_timer = smoke.map(|secs| {
+        let t = slint::Timer::default();
+        let weak = ui.as_weak();
+        t.start(slint::TimerMode::SingleShot, std::time::Duration::from_secs(secs), move || {
+            let visible = weak.upgrade().is_some_and(|w| w.window().is_visible());
+            log::info(&format!("smoke test: window visible = {visible}"));
+            println!("smoke test: window visible = {visible}");
+            let _ = slint::quit_event_loop();
+        });
+        t
+    });
     ui.global::<AppState>().set_startup_time(format!("{} ms", started.elapsed().as_millis()).into());
     slint::run_event_loop()?;
 

@@ -37,13 +37,15 @@ Fair print: "window visible" is when the OS reports a window, and an Electron wi
 **Local Git (works offline, no sign-in)**
 - Open any repository (or `gitust <path>` from a terminal), pinned and recent repositories
 - Staged / unstaged / untracked / conflicted files, kept live by a debounced, ignore-aware file watcher
-- Fast diffs with line numbers, tab expansion, binary detection, large-file guard (3 MB) and 5,000-line cap
+- Fast diffs with **syntax highlighting** (20+ languages) and **word-level change highlighting**, line numbers, binary detection, large-file guard (3 MB) and 5,000-line cap
 - Conflict view with *ours* / *theirs* regions tinted and marker lines highlighted; **Use mine / Use theirs** per file (rebase-aware, handles a side that deleted the file)
 - Stage / unstage per file, **per hunk or per line** (tick lines in the diff, Shift+click for a range), or everything; double-click or Space to stage; discard a file, a hunk or selected lines (always confirmed)
 - Commit with summary + description, 72-char hint, **Ctrl+Enter** from anywhere, amend (with a warning if the commit is already pushed)
-- History with branch/tag decorations, unpushed markers, incremental loading, filter by message/author/SHA, full commit detail and multi-file diff
-- Branches: local + remote, ahead/behind, switch (tracks remote branches automatically), create, merge, delete (safe `-d` only), revert commits
-- Stash all (including untracked) / pop
+- History with a **branch graph**, branch/tag decorations, unpushed markers, incremental loading, filter by message/author/SHA, full commit detail and multi-file diff
+- Branches: local + remote, ahead/behind, switch (tracks remote branches automatically), create, rename, merge, delete (safe `-d` only)
+- Commits: revert, cherry-pick, tag (lightweight or annotated, push one tag), undo the last commit (changes stay staged)
+- Merges, rebases, cherry-picks and reverts in progress: **Continue** or **Abort** from the banner
+- Stash all (including untracked); list, apply, pop or drop any stash
 - Fetch, pull, push / publish branch with live progress and **cancel**; when a pull finds diverged branches you choose merge or rebase
 - Clone by URL or `owner/name`, with progress
 - Plain-English error explanations (auth, diverged branches, conflicts, rejected pushes, missing identity…), with the raw Git output one click away
@@ -54,7 +56,7 @@ Fair print: "window visible" is when the OS reports a window, and an Electron wi
 - **Several accounts**: switch between them in the GitHub tab, and pin one to a repository so it is picked automatically when you open it (pushes and pulls keep using Git's own credentials)
 - Browse your repositories (cached for instant, offline display) and clone or open them in one click
 - Open pull requests and issues for the current repository or everything involving you; notifications inbox
-- Open on GitHub, create a pull request from the current branch
+- **Create pull requests in the app** (title, description, base, draft); the current branch's open PR and its CI status show in the header
 
 **Workflow**
 - Command palette (**Ctrl+P**): fuzzy-search commands, repositories, branches and your GitHub repos
@@ -137,7 +139,7 @@ The other two sign-in methods (GitHub CLI session, personal access token) work w
 | Linux *(preview)* | `.deb` · `.AppImage` · `.tar.gz` (x86_64, built on Ubuntu 22.04) |
 | macOS *(preview)* | `.dmg` with a universal `Gitust.app` (Apple Silicon + Intel) |
 
-Linux and macOS builds pass the full test suite in CI but haven't been tried on real machines yet. Nothing is code-signed yet, so Windows SmartScreen warns on first run and macOS needs right-click → Open the first time.
+Linux and macOS builds pass the full test suite in CI, and every push launches the real app on all three systems and checks its window opens (`.github/workflows/smoke.yml`, with screenshots), but they haven't had daily use yet. Nothing is code-signed yet, so Windows SmartScreen warns on first run and macOS needs right-click → Open the first time.
 
 Set the repository variable `GITUST_GITHUB_CLIENT_ID` to build browser sign-in into release builds. Build the Windows zip locally with `cargo build --release` then `./scripts/package.ps1`.
 
@@ -191,7 +193,7 @@ Design rules:
 - GitHub.com only (no Enterprise host setting)
 - Opens your system terminal rather than embedding one
 - No built-in merge editor: conflicts can be resolved by taking one side whole, otherwise in your editor
-- Developed and tested on Windows 11. Linux and macOS builds pass the test suite in CI and ship with each release, but haven't been tried on real machines yet
+- Developed and tested on Windows 11. Linux and macOS builds pass the tests and a launch test in CI and ship with each release, but haven't had daily use yet
 - Releases aren't code-signed yet; updates are announced, not installed automatically
 
 ## License
