@@ -254,6 +254,8 @@ export global AppState {
     callback stage-hunk(int);
     callback stage-selected-lines();
     callback clear-line-selection();
+    callback discard-selected-lines();
+    callback discard-hunk(int);
     // conflicts: (path, mine)
     callback take-side(string, bool);
     // diverged pull: 1 merge, 2 rebase

@@ -95,6 +95,7 @@ enum Pending {
     Amend,
     Trust,
     TakeSide { path: String, mine: bool },
+    DiscardLines { key: String, rows: Vec<usize> },
 }
 
 fn select_key(change: &FileChange, fingerprint: u64) -> String {
@@ -544,6 +545,14 @@ impl App {
         on!(on_toggle_diff_line, |app, row: i32, shift: bool| app.toggle_diff_line(row, shift));
         on!(on_stage_hunk, |app, row: i32| app.stage_hunk(row));
         on!(on_stage_selected_lines, |app| app.stage_selected_lines());
+        on!(on_discard_selected_lines, |app| {
+            let (key, rows) = app.picked_rows();
+            app.confirm_discard_rows(key, rows);
+        });
+        on!(on_discard_hunk, |app, row: i32| {
+            let (key, rows) = app.hunk_rows(row);
+            app.confirm_discard_rows(key, rows);
+        });
         on!(on_clear_line_selection, |app| app.with_diff_model(|st, model| {
             for i in 0..model.row_count() {
                 if let Some(mut r) = model.row_data(i).filter(|r| r.selected) {
@@ -692,6 +701,7 @@ impl App {
                 self.ui(|_, st| st.set_untrusted_summary("".into()));
                 self.info("Repository trusted");
             }
+            Some(Pending::DiscardLines { key, rows }) => self.discard_rows(key, rows),
             Some(Pending::TakeSide { path, mine }) => {
                 let rebasing = self.st().summary.as_ref().is_some_and(|s| s.state == "Rebasing");
                 self.op("Resolving", true, true, move |_, root, opts| async move {
@@ -1026,7 +1036,8 @@ impl App {
         });
     }
 
-    fn stage_hunk(self: &Arc<Self>, header_row: i32) {
+    /// The selectable rows of the hunk whose header is at `header_row`, with the diff key.
+    fn hunk_rows(&self, header_row: i32) -> (String, Vec<usize>) {
         let mut rows = Vec::new();
         let mut key = String::new();
         self.with_diff_model(|st, model| {
@@ -1042,17 +1053,56 @@ impl App {
                 }
             }
         });
-        self.stage_rows(key, rows);
+        (key, rows)
     }
 
-    fn stage_selected_lines(self: &Arc<Self>) {
+    /// The ticked rows, with the diff key.
+    fn picked_rows(&self) -> (String, Vec<usize>) {
         let mut rows = Vec::new();
         let mut key = String::new();
         self.with_diff_model(|st, model| {
             key = st.get_diff_select_key().to_string();
             rows = model.iter().enumerate().filter(|(_, r)| r.selected).map(|(i, _)| i).collect();
         });
+        (key, rows)
+    }
+
+    fn stage_hunk(self: &Arc<Self>, header_row: i32) {
+        let (key, rows) = self.hunk_rows(header_row);
         self.stage_rows(key, rows);
+    }
+
+    fn stage_selected_lines(self: &Arc<Self>) {
+        let (key, rows) = self.picked_rows();
+        self.stage_rows(key, rows);
+    }
+
+    /// Asks first: discarded lines can't be recovered.
+    fn confirm_discard_rows(self: &Arc<Self>, key: String, rows: Vec<usize>) {
+        let Some((false, _, path)) = parse_select_key(&key) else { return };
+        if rows.is_empty() {
+            return;
+        }
+        let n = rows.len();
+        let text = format!(
+            "The {n} selected line{} in {path} go back to their staged version; other edits in the file stay. This can't be undone.",
+            if n == 1 { "" } else { "s" }
+        );
+        self.confirm(Pending::DiscardLines { key, rows }, "Discard selected lines?", &text, "Discard lines", true);
+    }
+
+    fn discard_rows(self: &Arc<Self>, key: String, rows: Vec<usize>) {
+        let Some((false, fingerprint, path)) = parse_select_key(&key) else { return };
+        let change = self.st().summary.as_ref().and_then(|x| x.unstaged.iter().find(|c| c.path == path).cloned());
+        let Some(change) = change else {
+            self.info(format!("{path} changed; select the lines again"));
+            return;
+        };
+        self.op("Discarding lines", true, true, move |_, root, opts| async move {
+            let root = root.ok_or_else(|| anyhow!("No repository"))?;
+            let n = ops::discard_lines(&root, change, fingerprint, rows, opts).await?;
+            Ok(Some(format!("Discarded {n} line{}", if n == 1 { "" } else { "s" })))
+        });
     }
 
     /// Stages/unstages diff rows of the file named by `key` (see `select_key`).

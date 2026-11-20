@@ -16,6 +16,22 @@ No Electron, no webview, no Node runtime: one small executable.</p>
 
 GitHub Desktop is pleasant but it ships a browser. Gitust keeps the same everyday flow (see what changed, stage, commit, branch, push) in a native [Slint](https://slint.dev) window that starts fast and idles at ~0% CPU. GitHub is optional: everything local works offline with no account.
 
+## Gitust vs. GitHub Desktop
+
+> **Test scenario:** both apps open on the same repository (this one) and left idle, on Windows 11 with an AMD Ryzen 7 5700X and 32 GB RAM. Memory and CPU are summed over **all** of each app's processes, measured 20 s after launch over 15 s; median of 3 runs. Reproduce with [`scripts/compare.ps1`](scripts/compare.ps1).
+
+| Metric | GitHub Desktop 3.6.7 (Electron) | Gitust 0.1.0 (native Rust + Slint) | Advantage |
+|---|---|---|---|
+| **Memory** (private bytes) | 267.3 MB *(across 4 processes)* | **10.1 MB** *(single process)* | ~26× less (−96%) |
+| **Memory** (working set) | 365.8 MB | **32.7 MB** | ~11× less (−91%) |
+| **Size on disk** | 582.4 MB *(app folder)* | **16.5 MB** *(one `.exe`)* | ~35× smaller (−97%) |
+| **Window visible after launch** | 561 ms | **50 ms** | ~11× faster |
+| **Idle CPU** | 0.05% | 0.00% | both idle |
+
+<p align="center"><img src="assets/benchmark.svg" alt="Bar charts: Gitust uses 26 times less private memory, 11 times less working set, is 35 times smaller on disk and shows its window 11 times faster than GitHub Desktop"></p>
+
+Fair print: "window visible" is when the OS reports a window, and an Electron window can appear before its content has loaded, so the real gap to a usable screen is, if anything, larger. The first (cold) launch took 1,319 ms vs 414 ms. GitHub Desktop is a mature product with features Gitust doesn't have yet; this compares what it costs to keep each one open all day.
+
 ## Features
 
 **Local Git (works offline, no sign-in)**
@@ -23,7 +39,7 @@ GitHub Desktop is pleasant but it ships a browser. Gitust keeps the same everyda
 - Staged / unstaged / untracked / conflicted files, kept live by a debounced, ignore-aware file watcher
 - Fast diffs with line numbers, tab expansion, binary detection, large-file guard (3 MB) and 5,000-line cap
 - Conflict view with *ours* / *theirs* regions tinted and marker lines highlighted; **Use mine / Use theirs** per file (rebase-aware, handles a side that deleted the file)
-- Stage / unstage per file, **per hunk or per line** (tick lines in the diff, Shift+click for a range), or everything; double-click or Space to stage, discard with confirmation
+- Stage / unstage per file, **per hunk or per line** (tick lines in the diff, Shift+click for a range), or everything; double-click or Space to stage; discard a file, a hunk or selected lines (always confirmed)
 - Commit with summary + description, 72-char hint, **Ctrl+Enter** from anywhere, amend (with a warning if the commit is already pushed)
 - History with branch/tag decorations, unpushed markers, incremental loading, filter by message/author/SHA, full commit detail and multi-file diff
 - Branches: local + remote, ahead/behind, switch (tracks remote branches automatically), create, merge, delete (safe `-d` only), revert commits

@@ -75,12 +75,15 @@ pub async fn discard(root: &Path, path: &str, opts: Opts) -> Result<()> {
     git_ok(Some(root), &args, with_paths(opts, &[path])).await.map(drop)
 }
 
-/// Applies a patch to the index only. The `-c` overrides stop a user's
-/// `apply.whitespace=fix` from silently rewriting the staged lines and
-/// `apply.ignoreWhitespace` from matching the wrong context.
-pub async fn apply_cached(root: &Path, patch: Vec<u8>, reverse: bool, mut opts: Opts) -> Result<()> {
+/// Applies a patch to the index only (`cached`) or to the working tree only.
+/// The `-c` overrides stop a user's `apply.whitespace=fix` from silently
+/// rewriting the lines and `apply.ignoreWhitespace` from matching the wrong context.
+pub async fn apply_patch(root: &Path, patch: Vec<u8>, cached: bool, reverse: bool, mut opts: Opts) -> Result<()> {
     opts.stdin = Some(patch);
-    let mut args = vec!["-c", "apply.whitespace=nowarn", "-c", "apply.ignoreWhitespace=no", "apply", "--cached"];
+    let mut args = vec!["-c", "apply.whitespace=nowarn", "-c", "apply.ignoreWhitespace=no", "apply"];
+    if cached {
+        args.push("--cached");
+    }
     if reverse {
         args.push("--reverse");
     }
@@ -95,6 +98,30 @@ pub async fn apply_cached(root: &Path, patch: Vec<u8>, reverse: bool, mut opts: 
     })
 }
 
+/// Re-reads the diff the user selected rows on and maps the rows to hunk
+/// positions. Fails if the file changed since (different fingerprint).
+async fn selection(
+    root: &Path,
+    change: &FileChange,
+    fingerprint: u64,
+    rows: Vec<usize>,
+) -> Result<(patch::FileDiff, HashSet<(usize, usize)>)> {
+    let (r, c) = (root.to_path_buf(), change.clone());
+    let (view, source) = blocking(move || git::file_diff_with_source(&git::open(&r)?, &c, true)).await?;
+    let Some(source) = source else {
+        bail!("Picking lines isn't available for {}. Use the whole file instead.", change.path)
+    };
+    if source.fingerprint() != fingerprint {
+        bail!("{} changed since you selected lines. Check the diff and select them again.", change.path);
+    }
+    let mut selected = HashSet::new();
+    for row in rows {
+        let pos = view.lines.get(row).and_then(|l| l.pos).ok_or(patch::PatchError::BadSelection)?;
+        selected.insert((pos.0 as usize, pos.1 as usize));
+    }
+    Ok((source, selected))
+}
+
 /// Stages (or, for a staged `change`, unstages) the diff rows the user
 /// selected. `fingerprint` identifies the diff those rows were taken from; if
 /// the file changed since, nothing is applied. Returns the number of lines.
@@ -106,19 +133,7 @@ pub async fn stage_lines(
     unborn: bool,
     opts: Opts,
 ) -> Result<usize> {
-    let (r, c) = (root.to_path_buf(), change.clone());
-    let (view, source) = blocking(move || git::file_diff_with_source(&git::open(&r)?, &c, true)).await?;
-    let Some(source) = source else {
-        bail!("Line staging isn't available for {}. Stage or unstage the whole file instead.", change.path)
-    };
-    if source.fingerprint() != fingerprint {
-        bail!("{} changed since you selected lines. Check the diff and select them again.", change.path);
-    }
-    let mut selected = HashSet::new();
-    for row in rows {
-        let pos = view.lines.get(row).and_then(|l| l.pos).ok_or(patch::PatchError::BadSelection)?;
-        selected.insert((pos.0 as usize, pos.1 as usize));
-    }
+    let (source, selected) = selection(root, &change, fingerprint, rows).await?;
     let n = selected.len();
     if n == 0 {
         return Ok(0);
@@ -136,7 +151,37 @@ pub async fn stage_lines(
     }
     let dir = if change.staged { Direction::Unstage } else { Direction::Stage };
     let Some(bytes) = patch::build(&change.path, &source, &selected, dir)? else { return Ok(0) };
-    apply_cached(root, bytes, change.staged, opts).await?;
+    apply_patch(root, bytes, true, change.staged, opts).await?;
+    Ok(n)
+}
+
+/// Throws away the selected unstaged lines of a modified or deleted file: the
+/// working file goes back to the staged content for those lines only.
+///
+/// The working file is the *new* side of the unstaged diff, so this is the
+/// unstage construction (unselected `+` lines stay, unselected `-` lines stay
+/// absent) applied in reverse to the working tree instead of the index.
+pub async fn discard_lines(
+    root: &Path,
+    change: FileChange,
+    fingerprint: u64,
+    rows: Vec<usize>,
+    opts: Opts,
+) -> Result<usize> {
+    if change.staged || !matches!(change.status, 'M' | 'D') {
+        bail!("Only unstaged edits to tracked files can be discarded line by line.");
+    }
+    let (source, selected) = selection(root, &change, fingerprint, rows).await?;
+    let n = selected.len();
+    if n == 0 {
+        return Ok(0);
+    }
+    if n == source.changed_lines() {
+        discard(root, &change.path, opts).await?;
+        return Ok(n);
+    }
+    let Some(bytes) = patch::build(&change.path, &source, &selected, Direction::Unstage)? else { return Ok(0) };
+    apply_patch(root, bytes, false, true, opts).await?;
     Ok(n)
 }
 
@@ -531,6 +576,102 @@ mod tests {
             assert!(seen.contains_key(kind), "{kind} never exercised: {seen:?}");
         }
         eprintln!("{dir:?}: {seen:?}");
+    }
+
+    /// Discarding picked lines: the working file must equal the oracle applied
+    /// to it (it is the diff's new side) and the index must not move.
+    fn random_discard_round(seed: u64) -> &'static str {
+        let mut rng = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
+        let (_d, root) = repo();
+        let old_lines = gen_lines(&mut rng, 14);
+        let new_lines = mutate(&mut rng, &old_lines);
+        let old = join(&old_lines, rng.chance(80));
+        // Sometimes the file was deleted in the worktree.
+        let deleted = rng.chance(8) && !old.is_empty();
+        let new = if deleted { Vec::new() } else { join(&new_lines, rng.chance(80)) };
+        if old == new {
+            return "same";
+        }
+        let path = "d/f ü.txt";
+        fs::create_dir_all(root.join("d")).unwrap();
+        set_index(&root, path, &old);
+        commit_index(&root, "base");
+        // `set_index` never writes the file, so "deleted" is just not writing it.
+        if !deleted {
+            fs::write(root.join(path), &new).unwrap();
+        }
+        let c = change(&root, path, false);
+        let (v, fd) = view(&root, &c);
+        let picked: Vec<usize> = rows_of(&v, |_| true).into_iter().filter(|_| rng.chance(50)).collect();
+        let sel: HashSet<(usize, usize)> =
+            picked.iter().map(|&r| v.lines[r].pos.map(|(h, l)| (h as usize, l as usize)).unwrap()).collect();
+        let whole = sel.len() == fd.changed_lines();
+        let expected = if whole { Some(old.clone()) } else { oracle(&new, &fd, &sel, Direction::Unstage) };
+        let read = || fs::read(root.join(path)).ok();
+        let before = read();
+        let res = rt().block_on(discard_lines(&root, c, v.fingerprint.unwrap(), picked.clone(), Opts::default()));
+        let ctx = format!("seed {seed}\nold {old:?}\nnew {new:?} deleted {deleted}\npicked {picked:?}");
+        let outcome = match (res, expected) {
+            (Ok(_), Some(want)) => {
+                if sel.is_empty() {
+                    assert_eq!(read(), before, "{ctx}");
+                    "empty"
+                } else {
+                    assert_eq!(read().unwrap_or_default(), want, "{ctx}");
+                    if whole { "whole" } else { "partial" }
+                }
+            }
+            (Err(e), None) => {
+                assert!(matches!(e.downcast_ref(), Some(patch::PatchError::MissingNewline)), "{ctx}\n{e:#}");
+                assert_eq!(read(), before, "file untouched on refusal\n{ctx}");
+                "refused"
+            }
+            (r, want) => panic!("{ctx}\nresult {r:?}\nexpected {want:?}"),
+        };
+        assert_eq!(index_blob(&root, path).unwrap(), old, "the index never changes\n{ctx}");
+        outcome
+    }
+
+    #[test]
+    fn random_discard_lines_matches_oracle() {
+        let mut seen: std::collections::BTreeMap<&str, usize> = Default::default();
+        for seed in 2001..=2120 {
+            *seen.entry(random_discard_round(seed)).or_default() += 1;
+        }
+        eprintln!("Discard: {seen:?}");
+        assert!(seen.get("partial").copied().unwrap_or(0) >= 30, "{seen:?}");
+        for kind in ["whole", "refused"] {
+            assert!(seen.contains_key(kind), "{kind} never exercised: {seen:?}");
+        }
+    }
+
+    #[test]
+    fn discard_lines_with_crlf_worktree() {
+        let (_d, root) = repo();
+        run(&root, &["config", "core.autocrlf", "true"]);
+        fs::write(root.join("c.txt"), "a\r\nb\r\n").unwrap();
+        run(&root, &["add", "c.txt"]);
+        run(&root, &["commit", "-qm", "base"]);
+        fs::write(root.join("c.txt"), "a\r\nKEEP\r\nb\r\nDROP\r\n").unwrap();
+        let c = change(&root, "c.txt", false);
+        let (v, _) = view(&root, &c);
+        let rows = rows_of(&v, |t| t == "DROP");
+        rt().block_on(discard_lines(&root, c, v.fingerprint.unwrap(), rows, Opts::default())).unwrap();
+        // Line endings in the working file are preserved.
+        assert_eq!(fs::read(root.join("c.txt")).unwrap(), b"a\r\nKEEP\r\nb\r\n");
+    }
+
+    #[test]
+    fn discard_lines_refuses_untracked_and_staged() {
+        let (_d, root) = repo();
+        fs::write(root.join("new.txt"), "a\nb\n").unwrap();
+        let c = change(&root, "new.txt", false);
+        let (v, _) = view(&root, &c);
+        let err = rt()
+            .block_on(discard_lines(&root, c, v.fingerprint.unwrap(), rows_of(&v, |_| true), Opts::default()))
+            .unwrap_err();
+        assert!(err.to_string().contains("tracked files"), "{err}");
+        assert_eq!(fs::read(root.join("new.txt")).unwrap(), b"a\nb\n");
     }
 
     #[test]

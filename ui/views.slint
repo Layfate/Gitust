@@ -105,6 +105,18 @@ component DiffRow inherits Rectangle {
                 clicked => { AppState.stage-hunk(root.index); }
             }
         }
+        if root.select-mode && k == 3 && !AppState.selected-staged && (AppState.diff-status == "M" || AppState.diff-status == "D"): VerticalLayout {
+            alignment: center;
+            padding-right: 10px;
+            IconButton {
+                width: 22px;
+                height: 20px;
+                icon-size: 13px;
+                icon: @image-url("icons/undo.svg");
+                label: "Discard hunk";
+                clicked => { AppState.discard-hunk(root.index); }
+            }
+        }
         Text {
             text: root.line.text;
             color: k == 3 ? T.muted : k == 5 ? T.subtle : k == 6 ? T.red : T.fg;
@@ -167,6 +179,16 @@ export component DiffPanel inherits Rectangle {
                         font-size: T.fs-sm;
                         text: (AppState.selected-staged ? "Unstage " : "Stage ") + AppState.diff-selected-count + (AppState.diff-selected-count == 1 ? " line" : " lines");
                         clicked => { AppState.stage-selected-lines(); }
+                    }
+                }
+                if AppState.diff-selected-count > 0 && !AppState.selected-staged && (AppState.diff-status == "M" || AppState.diff-status == "D"): VerticalLayout {
+                    alignment: center;
+                    FlatButton {
+                        quiet: true;
+                        height: 26px;
+                        font-size: T.fs-sm;
+                        text: "Discard " + AppState.diff-selected-count + (AppState.diff-selected-count == 1 ? " line" : " lines");
+                        clicked => { AppState.discard-selected-lines(); }
                     }
                 }
                 if AppState.diff-selected-count > 0: VerticalLayout {

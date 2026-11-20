@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="840" height="278" viewBox="0 0 840 278" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif" role="img" aria-label="Gitust versus GitHub Desktop: memory, size on disk and startup time">
+<style>
+  .bg{fill:#ffffff} .t1{fill:#1f2328} .t2{fill:#59636e} .grid{stroke:#d1d9e0}
+  .gd{fill:#4a7fb8} .gu{fill:#e8611f}
+  @media (prefers-color-scheme: dark){
+    .bg{fill:#0d1117} .t1{fill:#e6edf3} .t2{fill:#9198a1} .grid{stroke:#3d444d}
+    .gd{fill:#5b93d1} .gu{fill:#e8611f}
+  }
+  text{font-size:13px}
+  .title{font-weight:600} .small{font-size:12px} .big{font-weight:700}
+</style>
+<rect class="bg" width="840" height="278" rx="8"/>
+<rect class="gd" x="20" y="16" width="12" height="12" rx="3"/>
+<text class="t1" x="38" y="26.5">GitHub Desktop 3.6.7</text>
+<rect class="gu" x="210.0" y="16" width="12" height="12" rx="3"/>
+<text class="t1" x="228.0" y="26.5">Gitust 0.1.0</text>
+<text class="t2 small" x="820" y="26.5" text-anchor="end">Lower is better · median of 3 runs</text>
+<text class="t1 title" x="20" y="60">Memory · private bytes</text>
+<text class="t1 big" x="390" y="60" text-anchor="end">26× less</text>
+<line class="grid" x1="170" x2="170" y1="70" y2="120" stroke-width="1"/>
+<text class="t2" x="160" y="86.5" text-anchor="end">GitHub Desktop</text>
+<path class="gd" d="M170.0,74.0h166.0a4,4 0 0 1 4,4v8.0a4,4 0 0 1 -4,4h-166.0z"/>
+<text class="t1" x="348.0" y="86.5">267 MB</text>
+<text class="t2" x="160" y="112.5" text-anchor="end">Gitust</text>
+<path class="gu" d="M170.0,100.0h3.2a3.2117471006359892,3.2117471006359892 0 0 1 3.2117471006359892,3.2117471006359892v9.6a3.2117471006359892,3.2117471006359892 0 0 1 -3.2117471006359892,3.2117471006359892h-3.2z"/>
+<text class="t1" x="184.42349420127198" y="112.5">10.1 MB</text>
+<text class="t1 title" x="420" y="60">Memory · working set</text>
+<text class="t1 big" x="790" y="60" text-anchor="end">11× less</text>
+<line class="grid" x1="570" x2="570" y1="70" y2="120" stroke-width="1"/>
+<text class="t2" x="560" y="86.5" text-anchor="end">GitHub Desktop</text>
+<path class="gd" d="M570.0,74.0h166.0a4,4 0 0 1 4,4v8.0a4,4 0 0 1 -4,4h-166.0z"/>
+<text class="t1" x="748.0" y="86.5">366 MB</text>
+<text class="t2" x="560" y="112.5" text-anchor="end">Gitust</text>
+<path class="gu" d="M570.0,100.0h11.2a4,4 0 0 1 4,4v8.0a4,4 0 0 1 -4,4h-11.2z"/>
+<text class="t1" x="593.196828868234" y="112.5">32.7 MB</text>
+<text class="t1 title" x="20" y="164">Size on disk</text>
+<text class="t1 big" x="390" y="164" text-anchor="end">35× smaller</text>
+<line class="grid" x1="170" x2="170" y1="174" y2="224" stroke-width="1"/>
+<text class="t2" x="160" y="190.5" text-anchor="end">GitHub Desktop</text>
+<path class="gd" d="M170.0,178.0h166.0a4,4 0 0 1 4,4v8.0a4,4 0 0 1 -4,4h-166.0z"/>
+<text class="t1" x="348.0" y="190.5">582 MB</text>
+<text class="t2" x="160" y="216.5" text-anchor="end">Gitust</text>
+<path class="gu" d="M170.0,204.0h2.4a2.4081387362637363,2.4081387362637363 0 0 1 2.4081387362637363,2.4081387362637363v11.2a2.4081387362637363,2.4081387362637363 0 0 1 -2.4081387362637363,2.4081387362637363h-2.4z"/>
+<text class="t1" x="182.81627747252747" y="216.5">16.5 MB</text>
+<text class="t1 title" x="420" y="164">Window visible after launch</text>
+<text class="t1 big" x="790" y="164" text-anchor="end">11× faster</text>
+<line class="grid" x1="570" x2="570" y1="174" y2="224" stroke-width="1"/>
+<text class="t2" x="560" y="190.5" text-anchor="end">GitHub Desktop</text>
+<path class="gd" d="M570.0,178.0h166.0a4,4 0 0 1 4,4v8.0a4,4 0 0 1 -4,4h-166.0z"/>
+<text class="t1" x="748.0" y="190.5">561 ms</text>
+<text class="t2" x="560" y="216.5" text-anchor="end">Gitust</text>
+<path class="gu" d="M570.0,204.0h11.2a4,4 0 0 1 4,4v8.0a4,4 0 0 1 -4,4h-11.2z"/>
+<text class="t1" x="593.1515151515151" y="216.5">50 ms</text>
+<text class="t2 small" x="20" y="266">Windows 11 · AMD Ryzen 7 5700X · 32 GB · both apps idle on the same repository, all processes summed · scripts/compare.ps1</text>
+</svg>
