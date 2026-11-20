@@ -63,7 +63,7 @@ jobs:
       # A draft, so you can check it before anyone sees it.
       - name: Draft GitHub release
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: dist/*
           draft: true
