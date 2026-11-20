@@ -191,9 +191,8 @@ Design rules:
 - GitHub.com only (no Enterprise host setting)
 - Opens your system terminal rather than embedding one
 - No built-in merge editor: conflicts can be resolved by taking one side whole, otherwise in your editor
-- Developed and tested on Windows 11. The CI workflow targets Linux and macOS too, but neither has been built or tried yet
+- Developed and tested on Windows 11. Linux and macOS builds pass the test suite in CI and ship with each release, but haven't been tried on real machines yet
 - Releases aren't code-signed yet; updates are announced, not installed automatically
-- Linux and macOS packages are untested previews
 
 ## License
 
