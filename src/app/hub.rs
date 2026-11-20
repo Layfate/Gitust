@@ -100,6 +100,7 @@ impl App {
         });
         self.push_gh_repos();
         self.push_account_pin();
+        self.refresh_branch_pr();
         if self.st().tab == 3 {
             self.gh_load(false);
         }
@@ -143,6 +144,7 @@ impl App {
             st.set_device_code("".into());
         });
         self.push_account_pin();
+        self.refresh_branch_pr();
     }
 
     pub(super) async fn gh_finish_sign_in(self: &Arc<Self>, token: String) -> Result<()> {

@@ -239,6 +239,7 @@ impl App {
                 app.st().last_fetch.insert(r, util::now());
             }
             app.load_branches();
+            app.refresh_branch_pr();
             Ok(Some("Fetched".into()))
         });
     }
@@ -301,6 +302,7 @@ impl App {
                 git_ok(root.as_deref(), &args, opts).await?;
                 app.load_history(true);
                 app.load_branches();
+                app.refresh_branch_pr();
                 Ok(Some(if upstream { "Pushed".into() } else { format!("Published {branch} to {remote}") }))
             },
         );

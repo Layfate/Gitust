@@ -296,6 +296,17 @@ export component RepoHeader inherits Rectangle {
                         vertical-alignment: center;
                         overflow: elide;
                     }
+                    if AppState.branch-pr-label != "": pr-ta := TouchArea {
+                        mouse-cursor: MouseCursor.pointer;
+                        clicked => { AppState.open-url(AppState.branch-pr-url); }
+                        VerticalLayout {
+                            alignment: center;
+                            Chip {
+                                text: AppState.branch-pr-label + (AppState.branch-pr-checks == "" ? "" : " · checks " + AppState.branch-pr-checks);
+                                tone: AppState.branch-pr-checks == "failing" ? T.red : AppState.branch-pr-checks == "passing" ? T.green : T.yellow;
+                            }
+                        }
+                    }
                     if AppState.stash-count > 0: TouchArea {
                         mouse-cursor: MouseCursor.pointer;
                         clicked => { AppState.show-stashes(); }

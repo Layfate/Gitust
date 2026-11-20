@@ -696,3 +696,54 @@ export component StashDialog inherits Modal {
         }
     }
 }
+
+export component CreatePrDialog inherits Modal {
+    title: "Create a pull request";
+    card-width: 560px;
+    close => { AppState.dialog = ""; }
+    init => { pr-title.focus(); }
+
+    Text {
+        text: AppState.branch + " → " + AppState.pr-base + " on " + AppState.github-slug;
+        color: T.muted;
+        font-family: T.mono;
+        font-size: T.fs-sm;
+    }
+    FieldLabel { text: "Title"; }
+    pr-title := LineEdit { text <=> AppState.pr-title; }
+    FieldLabel { text: "Description"; }
+    TextEdit {
+        text <=> AppState.pr-body;
+        height: 120px;
+        wrap: word-wrap;
+    }
+    HorizontalLayout {
+        spacing: 12px;
+        FieldLabel {
+            text: "Base branch";
+            vertical-alignment: center;
+        }
+        LineEdit {
+            width: 180px;
+            text <=> AppState.pr-base;
+        }
+        CheckBox {
+            text: "Draft";
+            checked <=> AppState.pr-draft;
+        }
+    }
+    HorizontalLayout {
+        spacing: 8px;
+        alignment: end;
+        FlatButton {
+            text: "Cancel";
+            clicked => { AppState.dialog = ""; }
+        }
+        FlatButton {
+            primary: true;
+            text: AppState.pr-draft ? "Create draft pull request" : "Create pull request";
+            enabled: AppState.pr-title != "" && AppState.pr-base != "" && !AppState.busy;
+            clicked => { AppState.submit-pr(AppState.pr-title, AppState.pr-body, AppState.pr-base, AppState.pr-draft); }
+        }
+    }
+}

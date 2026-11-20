@@ -149,6 +149,105 @@ pub async fn whoami(o: &Octocrab) -> Result<String> {
     Ok(get_json::<UserResp>(o, "/user").await?.login)
 }
 
+// ---------- pull requests for the current branch ----------
+
+#[derive(Deserialize)]
+struct RepoMeta {
+    default_branch: String,
+}
+
+pub async fn default_branch(o: &Octocrab, slug: &str) -> Result<String> {
+    Ok(get_json::<RepoMeta>(o, &format!("/repos/{slug}")).await?.default_branch)
+}
+
+#[derive(Deserialize)]
+struct PrResp {
+    number: u64,
+    html_url: String,
+    #[serde(default)]
+    draft: bool,
+    head: PrHead,
+}
+
+#[derive(Deserialize)]
+struct PrHead {
+    sha: String,
+}
+
+#[derive(Deserialize)]
+struct ChecksResp {
+    check_runs: Vec<CheckRun>,
+}
+
+#[derive(Deserialize)]
+struct CheckRun {
+    status: String,
+    conclusion: Option<String>,
+}
+
+/// The open pull request for `branch`, with a one-word CI summary.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BranchPr {
+    pub number: u64,
+    pub url: String,
+    pub draft: bool,
+    /// "passing", "failing", "running" or "" (no checks).
+    pub checks: String,
+}
+
+pub fn summarize_checks(runs: &[(String, Option<String>)]) -> &'static str {
+    if runs.is_empty() {
+        ""
+    } else if runs
+        .iter()
+        .any(|(_, c)| matches!(c.as_deref(), Some("failure" | "timed_out" | "cancelled" | "action_required")))
+    {
+        "failing"
+    } else if runs.iter().any(|(s, _)| s != "completed") {
+        "running"
+    } else {
+        "passing"
+    }
+}
+
+pub async fn branch_pr(o: &Octocrab, slug: &str, branch: &str) -> Result<Option<BranchPr>> {
+    let owner = slug.split('/').next().unwrap_or("");
+    let route = format!("/repos/{slug}/pulls?state=open&head={}", util::percent_encode(&format!("{owner}:{branch}")));
+    let prs: Vec<PrResp> = get_json(o, &route).await?;
+    let Some(pr) = prs.into_iter().next() else { return Ok(None) };
+    let checks = match get_json::<ChecksResp>(o, &format!("/repos/{slug}/commits/{}/check-runs", pr.head.sha)).await {
+        Ok(c) => summarize_checks(&c.check_runs.into_iter().map(|r| (r.status, r.conclusion)).collect::<Vec<_>>()),
+        Err(_) => "",
+    };
+    Ok(Some(BranchPr { number: pr.number, url: pr.html_url, draft: pr.draft, checks: checks.to_string() }))
+}
+
+#[derive(Serialize)]
+struct NewPr<'a> {
+    title: &'a str,
+    body: &'a str,
+    head: &'a str,
+    base: &'a str,
+    draft: bool,
+}
+
+/// Opens a pull request from `head` into `base`; returns its URL.
+pub async fn create_pr(
+    o: &Octocrab,
+    slug: &str,
+    head: &str,
+    base: &str,
+    title: &str,
+    body: &str,
+    draft: bool,
+) -> Result<String> {
+    let pr: PrResp = o
+        .post(format!("/repos/{slug}/pulls"), Some(&NewPr { title, body, head, base, draft }))
+        .await
+        .map_err(explain)?;
+    Ok(pr.html_url)
+}
+
 // ---------- updates ----------
 
 #[derive(Deserialize)]
@@ -415,6 +514,15 @@ impl DeviceLogin {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn check_summary() {
+        let r = |s: &str, c: Option<&str>| (s.to_string(), c.map(str::to_string));
+        assert_eq!(summarize_checks(&[]), "");
+        assert_eq!(summarize_checks(&[r("completed", Some("success")), r("completed", Some("skipped"))]), "passing");
+        assert_eq!(summarize_checks(&[r("completed", Some("success")), r("in_progress", None)]), "running");
+        assert_eq!(summarize_checks(&[r("in_progress", None), r("completed", Some("failure"))]), "failing");
+    }
 
     #[test]
     fn account_list() {

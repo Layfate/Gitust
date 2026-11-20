@@ -110,6 +110,7 @@ impl App {
             app.load_history(true);
             app.load_branches();
             app.apply_account_pin(&root);
+            app.refresh_branch_pr();
             if app.st().gh.is_some() {
                 app.st().gh_loaded.retain(|k, _| k == "repos");
             }
@@ -234,6 +235,7 @@ impl App {
         if head_changed {
             self.load_history(true);
             self.load_branches();
+            self.refresh_branch_pr();
         }
     }
 }

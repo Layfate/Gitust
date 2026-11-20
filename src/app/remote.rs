@@ -136,7 +136,92 @@ impl App {
             self.info("Publish this branch first, then create the pull request");
             return;
         }
-        self.open_url(&format!("https://github.com/{slug}/compare/{}?expand=1", encode_branch(&branch)));
+        // Signed in: a dialog right here. Otherwise GitHub's compare page.
+        let Some(client) = self.st().gh.clone() else {
+            self.open_url(&format!("https://github.com/{slug}/compare/{}?expand=1", encode_branch(&branch)));
+            return;
+        };
+        let summary = self.st().commits.first().map(|c| c.summary.clone()).unwrap_or_default();
+        let app = self.clone();
+        self.spawn(async move {
+            let base = github::default_branch(&client, &slug).await.unwrap_or_else(|_| "main".into());
+            if base == branch {
+                app.info(format!("{branch} is the default branch; switch to a feature branch to open a pull request"));
+                return;
+            }
+            app.ui(move |_, st| {
+                st.set_pr_title(summary.into());
+                st.set_pr_body("".into());
+                st.set_pr_base(base.into());
+                st.set_pr_draft(false);
+                st.set_dialog("create-pr".into());
+            });
+        });
+    }
+
+    /// Submits the Create pull request dialog.
+    pub(super) fn submit_pr(self: &Arc<Self>, title: String, body: String, base: String, draft: bool) {
+        let (client, slug, branch) = {
+            let s = self.st();
+            (s.gh.clone(), app_slug(&s), s.summary.as_ref().map(|x| x.branch.clone()))
+        };
+        let (Some(client), Some(slug), Some(branch)) = (client, slug, branch) else { return };
+        if title.trim().is_empty() {
+            self.info("Give the pull request a title");
+            return;
+        }
+        self.ui(|_, st| st.set_dialog("".into()));
+        let app = self.clone();
+        self.spawn(async move {
+            app.ui(|_, st| {
+                st.set_busy(true);
+                st.set_busy_text("Creating pull request…".into());
+                st.set_busy_cancellable(false);
+            });
+            let res = github::create_pr(&client, &slug, &branch, base.trim(), title.trim(), &body, draft).await;
+            app.ui(|_, st| st.set_busy(false));
+            match res {
+                Ok(url) => {
+                    app.info(format!("Pull request created: {url}"));
+                    app.open_url(&url);
+                    app.refresh_branch_pr();
+                }
+                Err(e) => app.fail(e.context("Couldn't create the pull request")),
+            }
+        });
+    }
+
+    /// Looks up the open PR (and its checks) for the current branch, when signed in.
+    pub(super) fn refresh_branch_pr(self: &Arc<Self>) {
+        let (client, slug, branch) = {
+            let s = self.st();
+            let sum = s.summary.as_ref();
+            (
+                s.gh.clone(),
+                app_slug(&s),
+                sum.filter(|x| !x.detached && !x.unborn && x.upstream.is_some()).map(|x| x.branch.clone()),
+            )
+        };
+        let (Some(client), Some(slug), Some(branch)) = (client, slug, branch) else {
+            self.ui(|_, st| {
+                st.set_branch_pr_label("".into());
+                st.set_branch_pr_url("".into());
+            });
+            return;
+        };
+        let app = self.clone();
+        self.spawn(async move {
+            let found = github::branch_pr(&client, &slug, &branch).await.ok().flatten();
+            let (label, url, checks) = match found {
+                Some(pr) => (format!("PR #{}{}", pr.number, if pr.draft { " (draft)" } else { "" }), pr.url, pr.checks),
+                None => (String::new(), String::new(), String::new()),
+            };
+            app.ui(move |_, st| {
+                st.set_branch_pr_label(label.into());
+                st.set_branch_pr_url(url.into());
+                st.set_branch_pr_checks(checks.into());
+            });
+        });
     }
 }
 

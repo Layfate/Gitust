@@ -127,6 +127,9 @@ impl App {
             true,
         ));
         on!(on_input_accept, |app| app.input_accept());
+        on!(on_submit_pr, |app, title: SharedString, body: SharedString, base: SharedString, draft: bool| {
+            app.submit_pr(title.to_string(), body.to_string(), base.to_string(), draft)
+        });
     }
 
     pub(super) fn workflow_confirmed(self: &Arc<Self>, pending: Pending) {

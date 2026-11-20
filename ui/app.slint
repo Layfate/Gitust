@@ -4,7 +4,7 @@ import { AppState, ChangeRow, DiffLine, Seg, GraphPath, StashItem, CommitItem, B
 import { VDivider } from "widgets.slint";
 import { Sidebar, RepoHeader, TabsBar, StatusBar, TrustBanner } from "chrome.slint";
 import { ChangesView, HistoryView, BranchesView, GitHubView, Welcome } from "views.slint";
-import { CloneDialog, NewBranchDialog, ConfirmDialog, ErrorDialog, SettingsDialog, CommandPalette, PullDivergedDialog, AboutDialog, InputDialog, StashDialog } from "dialogs.slint";
+import { CloneDialog, NewBranchDialog, ConfirmDialog, ErrorDialog, SettingsDialog, CommandPalette, PullDivergedDialog, AboutDialog, InputDialog, StashDialog, CreatePrDialog } from "dialogs.slint";
 
 export { AppState, T, ChangeRow, DiffLine, Seg, GraphPath, StashItem, CommitItem, BranchItem, RepoItem, GhRepoItem, GhItem, PaletteItem }
 
@@ -300,6 +300,12 @@ export component MainWindow inherits Window {
         height: root.height;
     }
     if AppState.dialog == "stashes": StashDialog {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+    }
+    if AppState.dialog == "create-pr": CreatePrDialog {
         x: 0;
         y: 0;
         width: root.width;

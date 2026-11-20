@@ -192,6 +192,16 @@ export global AppState {
     in-out property <string> device-code;
     in-out property <string> device-url;
     in-out property <bool> signing-in;
+    // Open pull request for the current branch ("PR #12"), its URL and CI state
+    // ("passing" | "failing" | "running" | "").
+    in-out property <string> branch-pr-label;
+    in-out property <string> branch-pr-url;
+    in-out property <string> branch-pr-checks;
+    // Create pull request dialog.
+    in-out property <string> pr-title;
+    in-out property <string> pr-body;
+    in-out property <string> pr-base;
+    in-out property <bool> pr-draft;
     // Every signed-in account (active first), whether one is being added, and
     // whether the open repository always uses the active one.
     in-out property <[string]> gh-accounts;
@@ -334,6 +344,7 @@ export global AppState {
     callback stash-pop-at(int);
     callback stash-drop(int);
     callback input-accept();
+    callback submit-pr(string, string, string, bool);
     callback check-updates();
     callback set-update-check(bool);
 }
