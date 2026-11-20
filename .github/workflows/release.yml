@@ -51,7 +51,7 @@ jobs:
           # WiX also writes a debug database next to the MSI; it isn't for users.
           Remove-Item dist/*.wixpdb -ErrorAction SilentlyContinue
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows
           path: dist/*
@@ -97,7 +97,7 @@ jobs:
           mv Gitust-*.AppImage "dist/Gitust-$v-x86_64.AppImage"
           ls -la dist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: linux
           path: dist/*
@@ -137,7 +137,7 @@ jobs:
           hdiutil create -volname "Gitust $v" -srcfolder dmg -ov -format UDZO "dist/Gitust-$v-macos-universal.dmg"
           ls -la dist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: macos
           path: dist/*
@@ -154,7 +154,7 @@ jobs:
       - name: Checksums
         run: cd dist && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: gitust-all
           path: dist/*
