@@ -5,6 +5,7 @@ mod app;
 mod cli;
 mod git;
 mod github;
+mod log;
 mod ops;
 mod patch;
 mod store;
@@ -18,6 +19,13 @@ use std::time::Instant;
 
 fn main() -> anyhow::Result<()> {
     let started = Instant::now();
+    log::init(&store::data_dir());
+    log::info(&format!(
+        "Gitust {} starting on {} {}",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS,
+        std::env::consts::ARCH
+    ));
 
     // Two workers are plenty: git2 work runs on the blocking pool, network is async.
     let rt = tokio::runtime::Builder::new_multi_thread()
@@ -28,7 +36,7 @@ fn main() -> anyhow::Result<()> {
         .build()?;
 
     let store = store::Store::open_default().or_else(|e| {
-        eprintln!("gitust: settings database unavailable ({e}); using an in-memory store");
+        log::error(&format!("settings database unavailable ({e:#}); using an in-memory store"));
         store::Store::in_memory()
     })?;
 

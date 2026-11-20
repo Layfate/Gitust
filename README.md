@@ -1,4 +1,4 @@
-<p align="center"><img src="ui/icons/logo.svg" width="72" alt=""></p>
+<p align="center"><img src="assets/gitust-512.png" width="96" alt="Gitust logo"></p>
 
 <h1 align="center">Gitust</h1>
 
@@ -66,7 +66,7 @@ Measured with [`scripts/bench.ps1`](scripts/bench.ps1) (release build, small rep
 
 | Measure | Plan budget | Small repo | Large repo¹ |
 |---|---|---|---|
-| Release binary | — | 16.2 MB, single file | |
+| Release binary | — | 16.6 MB, single file | |
 | Window visible after launch | < 1 s | 30 ms (158 ms first cold run) | 31 ms |
 | Idle private memory | < 120 MB | **9.8 MB** | **11.7 MB** |
 | Idle working set | — | 32 MB | 34 MB |
@@ -108,6 +108,16 @@ The device-flow button appears only when a GitHub OAuth App client ID is configu
 
 The other two sign-in methods (GitHub CLI session, personal access token) work without this.
 
+### Windows release files
+
+`.github/workflows/release.yml` builds them on GitHub Actions: push a tag such as `v0.1.0` to get a **draft** release, or run the workflow by hand to get them as a build artifact.
+
+- `Gitust-<version>-windows-x64-portable.zip`: unzip anywhere and run. The `portable` file next to `gitust.exe` keeps settings in a `data` folder beside it (delete the file to use your profile instead). Build it locally with `cargo build --release` then `./scripts/package.ps1`.
+- `Gitust-<version>-windows-x64.msi`: installs to Program Files with a Start-menu shortcut; newer versions upgrade in place. Built from `installer/gitust.wxs` with WiX 5.
+- `SHA256SUMS.txt`
+
+Set the repository variable `GITUST_GITHUB_CLIENT_ID` to build browser sign-in into release builds. The files aren't code-signed yet, so Windows SmartScreen warns on first run.
+
 ## Architecture
 
 ```
@@ -144,7 +154,9 @@ Design rules:
 |---|---|
 | Settings, recents, GitHub repo cache | `%APPDATA%\Gitust\gitust.db` · `~/Library/Application Support/Gitust` · `~/.local/share/Gitust` |
 | GitHub token | OS credential vault, service `gitust` |
-| `GITUST_DATA_DIR` | Override the data folder (portable installs, tests) |
+| Log file (errors and crashes; no tokens or file contents) | `gitust.log` in the data folder, rolled over at 1 MB · **Help → Show log file** |
+| Portable mode | a file named `portable` next to `gitust.exe` → data in `data\` beside it |
+| `GITUST_DATA_DIR` | Override the data folder (tests, scripts) |
 | `GITUST_GITHUB_CLIENT_ID` | OAuth App client ID for device-flow sign-in |
 | `SLINT_BACKEND` | e.g. `winit-femtovg` to use the OpenGL renderer instead of the default software renderer |
 
@@ -155,7 +167,7 @@ Design rules:
 - Opens your system terminal rather than embedding one
 - No built-in merge editor: conflicts can be resolved by taking one side whole, otherwise in your editor
 - Developed and tested on Windows 11. The CI workflow targets Linux and macOS too, but neither has been built or tried yet
-- No installer or auto-update yet; `cargo build --release` produces a single portable `.exe`
+- Windows: portable zip and MSI, unsigned; no auto-update. No Linux/macOS packages yet
 
 ## License
 

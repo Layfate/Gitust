@@ -1,0 +1,37 @@
+<!--
+  Windows installer (WiX v5). Built by .github/workflows/release.yml:
+    wix build installer/gitust.wxs -arch x64 -d Version=0.1.0
+      -d ExePath=target/release/gitust.exe -d IconPath=assets/gitust.ico -o Gitust.msi
+  Never change the UpgradeCode: it is how new versions replace old ones.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="Gitust" Manufacturer="Gitust" Version="$(var.Version)"
+           UpgradeCode="6a1d3f52-8c4e-4b7a-9e21-5d0c7f3b9a14" Scope="perMachine" Compressed="yes">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Gitust is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="GitustIcon" SourceFile="$(var.IconPath)" />
+    <Property Id="ARPPRODUCTICON" Value="GitustIcon" />
+
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="INSTALLFOLDER" Name="Gitust">
+        <Component Id="MainExecutable">
+          <File Id="GitustExe" Source="$(var.ExePath)" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Component Id="StartMenuShortcut">
+        <Shortcut Id="GitustShortcut" Name="Gitust" Description="Native Git and GitHub client"
+                  Target="[INSTALLFOLDER]gitust.exe" WorkingDirectory="INSTALLFOLDER" Icon="GitustIcon" />
+        <RegistryValue Root="HKMU" Key="Software\Gitust" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <Feature Id="Main">
+      <ComponentRef Id="MainExecutable" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+  </Package>
+</Wix>

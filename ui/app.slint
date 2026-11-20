@@ -10,7 +10,7 @@ export { AppState, T, ChangeRow, DiffLine, CommitItem, BranchItem, RepoItem, GhR
 
 export component MainWindow inherits Window {
     title: AppState.has-repo ? AppState.repo-name + " · " + AppState.branch + " — Gitust" : "Gitust";
-    icon: @image-url("icons/logo.svg");
+    icon: @image-url("icons/logo-64.png");
     preferred-width: 1280px;
     preferred-height: 800px;
     min-width: 940px;
@@ -205,6 +205,10 @@ export component MainWindow inherits Window {
             MenuItem {
                 title: "Keyboard shortcuts";
                 activated => { AppState.show-dialog("settings"); }
+            }
+            MenuItem {
+                title: "Show log file";
+                activated => { AppState.open-log(); }
             }
             MenuItem {
                 title: "Gitust on GitHub";

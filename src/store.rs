@@ -33,11 +33,19 @@ pub struct Recent {
     pub pinned: bool,
 }
 
-/// `GITUST_DATA_DIR` overrides the location (portable installs, tests).
+/// `GITUST_DATA_DIR` overrides the location (tests, scripts). A file named
+/// `portable` next to the executable (shipped in the portable zip) keeps
+/// everything in a `data` folder beside it instead.
 pub fn data_dir() -> PathBuf {
-    std::env::var_os("GITUST_DATA_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("Gitust"))
+    if let Some(dir) = std::env::var_os("GITUST_DATA_DIR") {
+        return PathBuf::from(dir);
+    }
+    if let Some(exe_dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf))
+        && exe_dir.join("portable").is_file()
+    {
+        return exe_dir.join("data");
+    }
+    dirs::data_dir().unwrap_or_else(std::env::temp_dir).join("Gitust")
 }
 
 impl Store {

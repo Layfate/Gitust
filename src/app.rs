@@ -296,6 +296,7 @@ impl App {
             Some(g) => (g.summary.clone(), g.detail.clone()),
             None => (format!("{e:#}"), format!("{e:?}")),
         };
+        crate::log::error(&format!("{summary}\n{detail}"));
         self.ui(move |_, st| {
             st.set_status_text(summary.into());
             st.set_error_detail(detail.into());
@@ -511,6 +512,11 @@ impl App {
             }
         });
         on!(on_open_terminal, |app| app.open_terminal());
+        on!(on_open_log, |_app| {
+            if let Some(p) = crate::log::path() {
+                reveal(p);
+            }
+        });
         on!(on_open_file, |app, p: SharedString| app.open_file(&p));
         on!(on_open_on_github, |app| {
             let (slug, branch) = {

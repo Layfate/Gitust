@@ -1,0 +1,69 @@
+name: Release
+
+# Push a tag like v0.1.0 to build a draft GitHub release, or run it by hand
+# (Actions → Release → Run workflow) to just get the files as an artifact.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      # Repository variable (Settings → Secrets and variables → Actions → Variables).
+      # Optional: without it the browser sign-in button is hidden.
+      GITUST_GITHUB_CLIENT_ID: ${{ vars.GITUST_GITHUB_CLIENT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --release --locked
+
+      - name: Version
+        id: v
+        shell: pwsh
+        run: |
+          $v = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages[0].version
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Portable zip
+        shell: pwsh
+        run: ./scripts/package.ps1 -Version ${{ steps.v.outputs.version }} -Out dist
+
+      - name: MSI
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          wix build installer/gitust.wxs -arch x64 `
+            -d Version=${{ steps.v.outputs.version }} `
+            -d ExePath=target/release/gitust.exe `
+            -d IconPath=assets/gitust.ico `
+            -o dist/Gitust-${{ steps.v.outputs.version }}-windows-x64.msi
+
+      - name: Checksums
+        shell: pwsh
+        run: |
+          Get-ChildItem dist -File | Get-FileHash -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } |
+            Set-Content dist/SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gitust-windows-${{ steps.v.outputs.version }}
+          path: dist/*
+
+      # A draft, so you can check it before anyone sees it.
+      - name: Draft GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          draft: true
