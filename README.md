@@ -136,7 +136,6 @@ The other two sign-in methods (GitHub CLI session, personal access token) work w
 | Windows | `…-windows-x64.msi` (installs to Program Files with a Start-menu shortcut; newer versions upgrade in place) · `…-windows-x64-portable.zip` (unzip and run; the `portable` file keeps settings in a `data` folder next to `gitust.exe`) |
 | Linux *(preview)* | `.deb` · `.AppImage` · `.tar.gz` (x86_64, built on Ubuntu 22.04) |
 | macOS *(preview)* | `.dmg` with a universal `Gitust.app` (Apple Silicon + Intel) |
-| All | `SHA256SUMS.txt` |
 
 Linux and macOS builds pass the full test suite in CI but haven't been tried on real machines yet. Nothing is code-signed yet, so Windows SmartScreen warns on first run and macOS needs right-click → Open the first time.
 

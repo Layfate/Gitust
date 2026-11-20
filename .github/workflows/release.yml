@@ -151,8 +151,9 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Checksums
-        run: cd dist && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      # GitHub shows each asset's SHA-256 on the release page, so no checksum file.
+      - name: List files
+        run: ls -la dist && cd dist && sha256sum *
 
       - uses: actions/upload-artifact@v7
         with:
