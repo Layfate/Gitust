@@ -18,6 +18,9 @@ export struct DiffLine {
     old-no: string,
     new-no: string,
     text: string,
+    // Line staging: this +/- row can be picked, and whether it is.
+    selectable: bool,
+    selected: bool,
 }
 
 export struct CommitItem {
@@ -124,6 +127,12 @@ export global AppState {
     in-out property <bool> diff-truncated;
     in-out property <string> diff-too-large;
     in-out property <bool> diff-binary;
+    // Line staging. The key names the exact diff ("staged:fingerprint:path");
+    // a refresh that produces the same key keeps the selection.
+    in-out property <string> diff-select-key;
+    in-out property <bool> diff-can-select;
+    in-out property <int> diff-selected-count;
+    in-out property <int> diff-anchor: -1;
 
     // ---- history ----
     in-out property <[CommitItem]> commits;
@@ -177,6 +186,11 @@ export global AppState {
     in-out property <string> branch-query;
     in-out property <string> gh-query;
     in-out property <string> new-branch-name;
+    // Non-empty while this repository's config/hooks run programs and it isn't trusted yet.
+    in-out property <string> untrusted-summary;
+    // Resizable left column of the Changes and History views (logical px).
+    in-out property <length> changes-width: 360px;
+    in-out property <length> history-width: 380px;
 
     // ---- intents ----
     callback open-repo-dialog();
@@ -235,4 +249,18 @@ export global AppState {
     callback browse-clone-root();
     callback tab-changed(int);
     callback show-dialog(string);
+    // line staging
+    callback toggle-diff-line(int, bool);
+    callback stage-hunk(int);
+    callback stage-selected-lines();
+    callback clear-line-selection();
+    // conflicts: (path, mine)
+    callback take-side(string, bool);
+    // diverged pull: 1 merge, 2 rebase
+    callback pull-with(int);
+    callback review-trust();
+    // keyboard navigation: returns the new row index to scroll to (-1: none)
+    callback step-change(int) -> int;
+    callback step-commit(int) -> int;
+    callback panel-resized();
 }

@@ -2,9 +2,9 @@ import { Palette } from "std-widgets.slint";
 import { T } from "theme.slint";
 import { AppState, ChangeRow, DiffLine, CommitItem, BranchItem, RepoItem, GhRepoItem, GhItem, PaletteItem } from "state.slint";
 import { VDivider } from "widgets.slint";
-import { Sidebar, RepoHeader, TabsBar, StatusBar } from "chrome.slint";
+import { Sidebar, RepoHeader, TabsBar, StatusBar, TrustBanner } from "chrome.slint";
 import { ChangesView, HistoryView, BranchesView, GitHubView, Welcome } from "views.slint";
-import { CloneDialog, NewBranchDialog, ConfirmDialog, ErrorDialog, SettingsDialog, CommandPalette } from "dialogs.slint";
+import { CloneDialog, NewBranchDialog, ConfirmDialog, ErrorDialog, SettingsDialog, CommandPalette, PullDivergedDialog } from "dialogs.slint";
 
 export { AppState, T, ChangeRow, DiffLine, CommitItem, BranchItem, RepoItem, GhRepoItem, GhItem, PaletteItem }
 
@@ -221,6 +221,7 @@ export component MainWindow inherits Window {
             VerticalLayout {
                 horizontal-stretch: 1;
                 if AppState.has-repo: RepoHeader { }
+                if AppState.has-repo && AppState.untrusted-summary != "": TrustBanner { }
                 TabsBar { }
                 if !AppState.has-repo && AppState.tab != 3: Welcome {
                     vertical-stretch: 1;
@@ -267,6 +268,12 @@ export component MainWindow inherits Window {
         height: root.height;
     }
     if AppState.dialog == "settings": SettingsDialog {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+    }
+    if AppState.dialog == "pull-diverged": PullDivergedDialog {
         x: 0;
         y: 0;
         width: root.width;

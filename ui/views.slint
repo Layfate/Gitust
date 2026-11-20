@@ -1,14 +1,30 @@
 import { ListView, LineEdit, TextEdit, CheckBox, Spinner } from "std-widgets.slint";
 import { T } from "theme.slint";
 import { AppState, ChangeRow, DiffLine, CommitItem, BranchItem, GhRepoItem, GhItem } from "state.slint";
-import { IconButton, FlatButton, Chip, Counter, StatusBadge, HDivider, VDivider, SectionLabel, EmptyState, Banner, Spacer, TabButton } from "widgets.slint";
+import { IconButton, FlatButton, Chip, Counter, StatusBadge, HDivider, VDivider, SectionLabel, EmptyState, Banner, Spacer, TabButton, Splitter, LineCheck } from "widgets.slint";
 
 // ───────────────────────────── Diff ─────────────────────────────
 
 component DiffRow inherits Rectangle {
     in property <DiffLine> line;
+    in property <int> index;
+    // Changes tab with a diff that supports line staging.
+    in property <bool> select-mode;
     property <int> k: root.line.kind;
-    background: k == 1 ? T.add-bg : k == 2 ? T.del-bg : k == 3 ? T.hunk-bg : k == 4 ? T.surface : k == 6 ? T.del-gutter : k == 7 ? T.ours-bg : k == 8 ? T.theirs-bg : transparent;
+    property <bool> pickable: root.select-mode && root.line.selectable;
+    property <bool> shift;
+    background: k == 1 ? (root.line.selected ? T.add-gutter : T.add-bg) : k == 2 ? (root.line.selected ? T.del-gutter : T.del-bg) : k == 3 ? T.hunk-bg : k == 4 ? T.surface : k == 6 ? T.del-gutter : k == 7 ? T.ours-bg : k == 8 ? T.theirs-bg : transparent;
+
+    // Click a +/- line to pick it for staging; Shift+click picks a range.
+    if root.pickable: TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down {
+                root.shift = e.modifiers.shift;
+            }
+        }
+        clicked => { AppState.toggle-diff-line(root.index, root.shift); }
+    }
 
     if k == 4: HorizontalLayout {
         padding-left: 12px;
@@ -39,6 +55,11 @@ component DiffRow inherits Rectangle {
     }
 
     if k != 4: HorizontalLayout {
+        if root.select-mode: Rectangle {
+            width: 24px;
+            background: k == 1 ? T.add-gutter : k == 2 ? T.del-gutter : transparent;
+            if root.pickable: LineCheck { checked: root.line.selected; }
+        }
         Rectangle {
             width: 46px;
             background: k == 1 ? T.add-gutter : k == 2 ? T.del-gutter : transparent;
@@ -73,6 +94,16 @@ component DiffRow inherits Rectangle {
             font-size: 12px;
             horizontal-alignment: center;
             vertical-alignment: center;
+        }
+        if root.select-mode && k == 3: VerticalLayout {
+            alignment: center;
+            padding-right: 10px;
+            FlatButton {
+                height: 20px;
+                font-size: T.fs-xs;
+                text: AppState.selected-staged ? "Unstage hunk" : "Stage hunk";
+                clicked => { AppState.stage-hunk(root.index); }
+            }
         }
         Text {
             text: root.line.text;
@@ -128,12 +159,49 @@ export component DiffPanel inherits Rectangle {
                     alignment: center;
                     Text { text: "−" + AppState.diff-dels; color: T.red; font-weight: 600; font-family: T.mono; font-size: T.fs-sm; }
                 }
+                if AppState.diff-selected-count > 0: VerticalLayout {
+                    alignment: center;
+                    FlatButton {
+                        primary: true;
+                        height: 26px;
+                        font-size: T.fs-sm;
+                        text: (AppState.selected-staged ? "Unstage " : "Stage ") + AppState.diff-selected-count + (AppState.diff-selected-count == 1 ? " line" : " lines");
+                        clicked => { AppState.stage-selected-lines(); }
+                    }
+                }
+                if AppState.diff-selected-count > 0: VerticalLayout {
+                    alignment: center;
+                    IconButton {
+                        icon: @image-url("icons/close.svg");
+                        label: "Clear line selection";
+                        icon-size: 12px;
+                        clicked => { AppState.clear-line-selection(); }
+                    }
+                }
+                if AppState.diff-status == "U": VerticalLayout {
+                    alignment: center;
+                    FlatButton {
+                        height: 26px;
+                        font-size: T.fs-sm;
+                        text: "Use mine";
+                        clicked => { AppState.take-side(AppState.selected-path, true); }
+                    }
+                }
+                if AppState.diff-status == "U": VerticalLayout {
+                    alignment: center;
+                    FlatButton {
+                        height: 26px;
+                        font-size: T.fs-sm;
+                        text: "Use theirs";
+                        clicked => { AppState.take-side(AppState.selected-path, false); }
+                    }
+                }
                 VerticalLayout {
                     alignment: center;
                     FlatButton {
                         height: 26px;
                         font-size: T.fs-sm;
-                        text: AppState.selected-staged ? "Unstage" : "Stage";
+                        text: AppState.diff-status == "U" ? "Mark resolved" : AppState.selected-staged ? "Unstage file" : "Stage file";
                         clicked => {
                             if AppState.selected-staged {
                                 AppState.unstage(AppState.selected-path);
@@ -252,12 +320,15 @@ export component DiffPanel inherits Rectangle {
             message: root.commit-mode ? (AppState.selected-commit == "" ? "Pick a commit on the left to see what it changed." : "This commit doesn't change any file contents.") : (AppState.diff-title == "" ? "Pick a changed file on the left to see its diff." : "Only metadata (like file mode) changed.");
         }
 
-        if !AppState.diff-loading && AppState.diff.length > 0: ListView {
+        if !AppState.diff-loading && AppState.diff.length > 0: diff-list := ListView {
+            property <bool> select-mode: !root.commit-mode && AppState.diff-can-select;
             vertical-stretch: 1;
-            content-width: max(self.visible-width, AppState.diff-max-chars * 6.7px + 140px);
-            for line in AppState.diff: DiffRow {
-                height: line.kind == 4 ? 32px : 19px;
+            content-width: max(self.visible-width, AppState.diff-max-chars * 6.7px + (self.select-mode ? 270px : 140px));
+            for line[i] in AppState.diff: DiffRow {
+                height: line.kind == 4 ? 32px : line.kind == 3 && diff-list.select-mode ? 26px : 19px;
                 line: line;
+                index: i;
+                select-mode: diff-list.select-mode;
             }
         }
 
@@ -315,7 +386,10 @@ component ChangeHeader inherits Rectangle {
 
 component FileRow inherits Rectangle {
     in property <ChangeRow> entry;
+    // Clicked: the list takes keyboard focus for arrow-key navigation.
+    callback picked();
     property <bool> selected: AppState.selected-path == root.entry.path && AppState.selected-staged == root.entry.staged;
+    property <bool> conflicted: root.entry.status == "U";
     background: root.selected ? T.selected : ta.has-hover ? T.hover : transparent;
 
     if root.selected: Rectangle {
@@ -327,7 +401,7 @@ component FileRow inherits Rectangle {
     ContextMenuArea {
         Menu {
             MenuItem {
-                title: root.entry.staged ? "Unstage" : "Stage";
+                title: root.conflicted ? "Mark resolved" : root.entry.staged ? "Unstage" : "Stage";
                 activated => {
                     if root.entry.staged {
                         AppState.unstage(root.entry.path);
@@ -337,8 +411,18 @@ component FileRow inherits Rectangle {
                 }
             }
             MenuItem {
+                title: "Use mine…";
+                enabled: root.conflicted;
+                activated => { AppState.take-side(root.entry.path, true); }
+            }
+            MenuItem {
+                title: "Use theirs…";
+                enabled: root.conflicted;
+                activated => { AppState.take-side(root.entry.path, false); }
+            }
+            MenuItem {
                 title: "Discard changes…";
-                enabled: !root.entry.staged && root.entry.status != "?" && root.entry.status != "U";
+                enabled: !root.entry.staged && root.entry.status != "?" && !root.conflicted;
                 activated => { AppState.discard(root.entry.path); }
             }
             MenuSeparator { }
@@ -350,7 +434,10 @@ component FileRow inherits Rectangle {
 
         ta := TouchArea {
             mouse-cursor: MouseCursor.pointer;
-            clicked => { AppState.select-change(root.entry.path, root.entry.staged); }
+            clicked => {
+                AppState.select-change(root.entry.path, root.entry.staged);
+                root.picked();
+            }
             double-clicked => {
                 if root.entry.staged {
                     AppState.unstage(root.entry.path);
@@ -464,13 +551,14 @@ component CommitBox inherits Rectangle {
             color: T.subtle;
             font-size: T.fs-xs;
             horizontal-alignment: center;
+            wrap: word-wrap;
         }
     }
 }
 
 export component ChangesView inherits HorizontalLayout {
     Rectangle {
-        width: 360px;
+        width: AppState.changes-width;
         background: T.bg;
         VerticalLayout {
             if AppState.repo-state != "" || AppState.conflicted-count > 0: VerticalLayout {
@@ -479,7 +567,7 @@ export component ChangesView inherits HorizontalLayout {
                 Banner {
                     tone: AppState.conflicted-count > 0 ? T.red : T.yellow;
                     text: AppState.conflicted-count > 0
-                        ? AppState.conflicted-count + " conflicted file(s). Edit them to remove the conflict markers, stage them, then commit."
+                        ? AppState.conflicted-count + " conflicted file(s). Pick a version with Use mine / Use theirs, or edit out the conflict markers and mark the file resolved. Then commit."
                         : AppState.repo-state + " in progress. Commit to finish, or abort it from the terminal.";
                 }
             }
@@ -506,12 +594,36 @@ export component ChangesView inherits HorizontalLayout {
                     }
                 }
             }
-            if AppState.staged-count + AppState.unstaged-count > 0: ListView {
+            // Up/Down move through files, Space stages or unstages the selected one.
+            if AppState.staged-count + AppState.unstaged-count > 0: files-fs := FocusScope {
                 vertical-stretch: 1;
-                for row in AppState.changes: Rectangle {
-                    height: row.header ? 36px : 28px;
-                    if row.header: ChangeHeader { entry: row; }
-                    if !row.header: FileRow { entry: row; }
+                key-pressed(e) => {
+                    if e.text == Key.DownArrow || e.text == Key.UpArrow {
+                        let row = AppState.step-change(e.text == Key.DownArrow ? 1 : -1);
+                        if row >= 0 {
+                            files.ensure-row-visible(row, ScrollBehavior.instant);
+                        }
+                        return accept;
+                    }
+                    if e.text == " " && AppState.selected-path != "" {
+                        if AppState.selected-staged {
+                            AppState.unstage(AppState.selected-path);
+                        } else {
+                            AppState.stage(AppState.selected-path);
+                        }
+                        return accept;
+                    }
+                    reject
+                }
+                files := ListView {
+                    for row in AppState.changes: Rectangle {
+                        height: row.header ? 36px : 28px;
+                        if row.header: ChangeHeader { entry: row; }
+                        if !row.header: FileRow {
+                            entry: row;
+                            picked => { files-fs.focus(); }
+                        }
+                    }
                 }
             }
             if AppState.unstaged-count > 0 || AppState.stash-count > 0: HorizontalLayout {
@@ -540,7 +652,10 @@ export component ChangesView inherits HorizontalLayout {
             CommitBox { }
         }
     }
-    VDivider { }
+    Splitter {
+        size <=> AppState.changes-width;
+        released => { AppState.panel-resized(); }
+    }
     DiffPanel {
         horizontal-stretch: 1;
     }
@@ -550,6 +665,7 @@ export component ChangesView inherits HorizontalLayout {
 
 component CommitRow inherits Rectangle {
     in property <CommitItem> item;
+    callback picked();
     property <bool> selected: AppState.selected-commit == root.item.id;
     background: root.selected ? T.selected : ta.has-hover ? T.hover : transparent;
 
@@ -574,7 +690,10 @@ component CommitRow inherits Rectangle {
         }
         ta := TouchArea {
             mouse-cursor: MouseCursor.pointer;
-            clicked => { AppState.select-commit(root.item.id); }
+            clicked => {
+                AppState.select-commit(root.item.id);
+                root.picked();
+            }
             VerticalLayout {
                 padding-left: 14px;
                 padding-right: 12px;
@@ -622,7 +741,7 @@ component CommitRow inherits Rectangle {
 
 export component HistoryView inherits HorizontalLayout {
     Rectangle {
-        width: 380px;
+        width: AppState.history-width;
         background: T.bg;
         VerticalLayout {
             HorizontalLayout {
@@ -640,21 +759,37 @@ export component HistoryView inherits HorizontalLayout {
                 title: AppState.commits-loading ? "Loading history…" : AppState.unborn ? "No commits yet" : "No matching commits";
                 message: AppState.unborn ? "Make your first commit from the Changes tab." : "";
             }
-            if AppState.commits.length > 0: list := ListView {
+            if AppState.commits.length > 0: commits-fs := FocusScope {
                 vertical-stretch: 1;
-                for c in AppState.commits: CommitRow {
-                    height: 56px;
-                    item: c;
+                key-pressed(e) => {
+                    if e.text == Key.DownArrow || e.text == Key.UpArrow {
+                        let row = AppState.step-commit(e.text == Key.DownArrow ? 1 : -1);
+                        if row >= 0 {
+                            list.ensure-row-visible(row, ScrollBehavior.instant);
+                        }
+                        return accept;
+                    }
+                    reject
                 }
-                changed content-y => {
-                    if !AppState.commits-exhausted && !AppState.commits-loading && (-self.content-y + self.visible-height) > (self.content-height - 400px) {
-                        AppState.load-more-commits();
+                list := ListView {
+                    for c in AppState.commits: CommitRow {
+                        height: 56px;
+                        item: c;
+                        picked => { commits-fs.focus(); }
+                    }
+                    changed content-y => {
+                        if !AppState.commits-exhausted && !AppState.commits-loading && (-self.content-y + self.visible-height) > (self.content-height - 400px) {
+                            AppState.load-more-commits();
+                        }
                     }
                 }
             }
         }
     }
-    VDivider { }
+    Splitter {
+        size <=> AppState.history-width;
+        released => { AppState.panel-resized(); }
+    }
     DiffPanel {
         horizontal-stretch: 1;
         commit-mode: true;

@@ -346,3 +346,52 @@ export component Banner inherits Rectangle {
         @children
     }
 }
+
+// Draggable divider. `size` is the width of the panel on its left.
+export component Splitter inherits Rectangle {
+    in-out property <length> size;
+    in property <length> min-size: 260px;
+    in property <length> max-size: 720px;
+    callback released();
+
+    // A 7px grab area around a 1px line; the panels' backgrounds show through.
+    width: 7px;
+    background: T.bg;
+
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        width: ta.has-hover || ta.pressed ? 2px : 1px;
+        background: ta.has-hover || ta.pressed ? T.accent : T.border;
+    }
+
+    ta := TouchArea {
+        mouse-cursor: MouseCursor.col-resize;
+        moved => {
+            if self.pressed {
+                root.size = max(root.min-size, min(root.max-size, root.size + self.mouse-x - self.pressed-x));
+            }
+        }
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.up {
+                root.released();
+            }
+        }
+    }
+}
+
+// Line-staging checkbox in the diff gutter.
+export component LineCheck inherits Rectangle {
+    in property <bool> checked;
+    width: 13px;
+    height: 13px;
+    border-radius: 3px;
+    border-width: root.checked ? 0px : 1.5px;
+    border-color: T.border-strong;
+    background: root.checked ? T.accent : T.bg.with-alpha(0.6);
+    if root.checked: Image {
+        source: @image-url("icons/check.svg");
+        width: 10px;
+        height: 10px;
+        colorize: T.accent-fg;
+    }
+}

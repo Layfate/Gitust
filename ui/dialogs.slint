@@ -161,10 +161,13 @@ export component ConfirmDialog inherits Modal {
             }
             reject
         }
-        Text {
-            text: AppState.confirm-text;
-            color: T.muted;
-            wrap: word-wrap;
+        // A layout, so the text wraps to the card instead of its own natural width.
+        VerticalLayout {
+            Text {
+                text: AppState.confirm-text;
+                color: T.muted;
+                wrap: word-wrap;
+            }
         }
     }
     HorizontalLayout {
@@ -449,6 +452,50 @@ export component CommandPalette inherits Rectangle {
                     vertical-alignment: center;
                 }
             }
+        }
+    }
+}
+
+export component PullDivergedDialog inherits Modal {
+    title: "Your branch and the remote have diverged";
+    card-width: 520px;
+    close => { AppState.dialog = ""; }
+
+    Text {
+        text: AppState.branch + " has " + AppState.ahead + " commit(s) that " + AppState.upstream + " doesn't, and the remote has " + AppState.behind + " you don't. Choose how to combine them:";
+        color: T.fg;
+        wrap: word-wrap;
+    }
+    VerticalLayout {
+        spacing: 8px;
+        Text {
+            text: "Merge — keeps both histories as they are and adds a merge commit. The safe choice if you're unsure.";
+            color: T.muted;
+            wrap: word-wrap;
+        }
+        Text {
+            text: "Rebase — replays your commits on top of the remote for a straight history. Their SHAs change, so only rebase commits you haven't shared.";
+            color: T.muted;
+            wrap: word-wrap;
+        }
+    }
+    HorizontalLayout {
+        spacing: 8px;
+        alignment: end;
+        FlatButton {
+            text: "Cancel";
+            clicked => { AppState.dialog = ""; }
+        }
+        FlatButton {
+            text: "Rebase";
+            enabled: !AppState.busy;
+            clicked => { AppState.pull-with(2); }
+        }
+        FlatButton {
+            primary: true;
+            text: "Merge";
+            enabled: !AppState.busy;
+            clicked => { AppState.pull-with(1); }
         }
     }
 }

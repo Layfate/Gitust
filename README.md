@@ -20,13 +20,13 @@ GitHub Desktop is pleasant but it ships a browser. Gitust keeps the same everyda
 - Open any repository (or `gitust <path>` from a terminal), pinned and recent repositories
 - Staged / unstaged / untracked / conflicted files, kept live by a debounced, ignore-aware file watcher
 - Fast diffs with line numbers, tab expansion, binary detection, large-file guard (3 MB) and 5,000-line cap
-- Conflict view with *ours* / *theirs* regions tinted and marker lines highlighted
-- Stage / unstage per file or all, double-click to stage, discard with confirmation
+- Conflict view with *ours* / *theirs* regions tinted and marker lines highlighted; **Use mine / Use theirs** per file (rebase-aware, handles a side that deleted the file)
+- Stage / unstage per file, **per hunk or per line** (tick lines in the diff, Shift+click for a range), or everything; double-click or Space to stage, discard with confirmation
 - Commit with summary + description, 72-char hint, **Ctrl+Enter** from anywhere, amend (with a warning if the commit is already pushed)
 - History with branch/tag decorations, unpushed markers, incremental loading, filter by message/author/SHA, full commit detail and multi-file diff
 - Branches: local + remote, ahead/behind, switch (tracks remote branches automatically), create, merge, delete (safe `-d` only), revert commits
 - Stash all (including untracked) / pop
-- Fetch, pull, push / publish branch with live progress and **cancel**
+- Fetch, pull, push / publish branch with live progress and **cancel**; when a pull finds diverged branches you choose merge or rebase
 - Clone by URL or `owner/name`, with progress
 - Plain-English error explanations (auth, diverged branches, conflicts, rejected pushes, missing identity…), with the raw Git output one click away
 
@@ -40,7 +40,8 @@ GitHub Desktop is pleasant but it ships a browser. Gitust keeps the same everyda
 **Workflow**
 - Command palette (**Ctrl+P**): fuzzy-search commands, repositories, branches and your GitHub repos
 - Native menu bar with shortcuts, right-click context menus
-- Light / dark / follow-system theme; remembers window size, last repository and settings
+- Resizable file and commit lists, arrow-key navigation
+- Light / dark / follow-system theme; remembers window size, panel widths, last repository and settings
 - Opens your terminal or file manager at the repository
 
 ## Keyboard
@@ -114,7 +115,9 @@ Slint UI (ui/*.slint)  ── callbacks ──▶  App controller (src/app.rs)
    ▲  AppState global                         │
    └──── invoke_from_event_loop ◀─────────────┤
                                               ├─▶ git.rs     libgit2: status, diff, history, branches (read-mostly)
-                                              ├─▶ cli.rs     installed git: commit, stage, fetch/pull/push/clone (argv only)
+                                              ├─▶ cli.rs     runs the installed git (argv only, no shell)
+                                              ├─▶ ops.rs     every repository mutation, tested against real repos
+                                              ├─▶ patch.rs   hunk/line staging patches (pure, fuzz-tested)
                                               ├─▶ github.rs  octocrab REST + OS keyring + device flow
                                               ├─▶ store.rs   SQLite: recents, settings, repo-list cache (migrations)
                                               └─▶ watch.rs   debounced, ignore-aware file watcher
@@ -131,6 +134,8 @@ Design rules:
 - Repositories are treated as untrusted: "Open file" reveals executables and scripts in the file manager instead of running them, and only `http(s)` links are opened.
 - Gitust never force-pushes, never hard-resets, and deletes branches only with `git branch -d` (refuses unmerged work). Discarding changes, merging, reverting and amending a pushed commit all ask first.
 - `GIT_TERMINAL_PROMPT=0` prevents hidden prompts; GUI credential managers still work.
+- A repository's own `.git/config` and hooks can make Git run programs (`core.fsmonitor`, `core.sshCommand`, filter and diff drivers, `core.hooksPath`, hook scripts…), which matters for a repository you were sent as a zip. Gitust reads repositories with libgit2, which runs none of them, and won't run any Git command in a repository with such settings until you review the list and trust it. Trust is remembered per repository and asked again if the list changes.
+- Line staging applies a patch built from the exact diff you saw: if the file changed in between, nothing is staged. The patch goes through `git apply --cached` with `apply.whitespace` and `apply.ignoreWhitespace` overridden, so the lines are staged byte for byte. Randomized tests compare the resulting index against an independent model.
 - Signing out deletes the token from the vault and clears cached GitHub data. Only repository metadata is cached; issue and PR contents are not stored.
 
 ## Data & configuration
@@ -145,10 +150,10 @@ Design rules:
 
 ## Known limitations / next steps
 
-- File-level staging only (no hunk or line staging yet)
+- Line staging is off for renames, binary files, symlinks/submodules and files with `filter`, `working-tree-encoding` or `ident` attributes (stage those as whole files)
 - One GitHub account at a time; GitHub.com only (no Enterprise host setting)
 - Opens your system terminal rather than embedding one
-- No built-in merge editor: conflicts are shown and explained, resolution happens in your editor
+- No built-in merge editor: conflicts can be resolved by taking one side whole, otherwise in your editor
 - Developed and tested on Windows 11. The CI workflow targets Linux and macOS too, but neither has been built or tried yet
 - No installer or auto-update yet; `cargo build --release` produces a single portable `.exe`
 

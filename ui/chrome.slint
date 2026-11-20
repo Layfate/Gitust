@@ -1,7 +1,7 @@
 import { ListView, Spinner, ProgressIndicator } from "std-widgets.slint";
 import { T } from "theme.slint";
 import { AppState, RepoItem } from "state.slint";
-import { IconButton, FlatButton, ToolbarButton, TabButton, Chip, HDivider, VDivider, SectionLabel, Spacer } from "widgets.slint";
+import { IconButton, FlatButton, ToolbarButton, TabButton, Chip, HDivider, VDivider, SectionLabel, Spacer, Banner } from "widgets.slint";
 
 component RepoRow inherits Rectangle {
     in property <RepoItem> item;
@@ -534,6 +534,29 @@ export component StatusBar inherits Rectangle {
                 color: T.subtle;
                 font-size: T.fs-sm;
                 vertical-alignment: center;
+            }
+        }
+    }
+}
+
+// Shown while the repository's own Git config or hooks would run programs and
+// the user hasn't trusted it yet. Gitust refuses Git commands until then.
+export component TrustBanner inherits Rectangle {
+    background: T.bg;
+    VerticalLayout {
+        padding: 10px;
+        padding-bottom: 0;
+        Banner {
+            tone: T.red;
+            text: "This repository's Git settings run programs on your computer (" + AppState.untrusted-summary + "). Gitust won't run Git commands here until you review and trust it.";
+            VerticalLayout {
+                alignment: center;
+                FlatButton {
+                    height: 26px;
+                    font-size: T.fs-sm;
+                    text: "Review…";
+                    clicked => { AppState.review-trust(); }
+                }
             }
         }
     }

@@ -5,6 +5,8 @@ mod app;
 mod cli;
 mod git;
 mod github;
+mod ops;
+mod patch;
 mod store;
 mod util;
 mod watch;

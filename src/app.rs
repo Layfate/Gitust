@@ -8,13 +8,14 @@
 use crate::cli::{self, Cancelled};
 use crate::git::{self, FileChange};
 use crate::github;
+use crate::ops::{self, GitFailure, blocking, git_ok};
 use crate::store::Store;
 use crate::util;
 use crate::watch::{self, RepoWatcher};
 use crate::{
     AppState, BranchItem, ChangeRow, CommitItem, DiffLine, GhItem, GhRepoItem, MainWindow, PaletteItem, RepoItem,
 };
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Result, anyhow};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel, Weak};
 use std::collections::HashMap;
 use std::future::Future;
@@ -25,36 +26,6 @@ use tokio::sync::Notify;
 
 const HISTORY_PAGE: usize = 300;
 const GH_STALE_SECS: i64 = 180;
-
-// ───────────────────────────── errors ─────────────────────────────
-
-/// A git failure with a human summary for the status bar and raw output for details.
-#[derive(Debug)]
-struct GitFailure {
-    summary: String,
-    detail: String,
-}
-impl std::fmt::Display for GitFailure {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.summary)
-    }
-}
-impl std::error::Error for GitFailure {}
-
-async fn git_ok(root: Option<&Path>, args: &[&str], opts: cli::Opts) -> Result<cli::Output> {
-    let argv: Vec<String> = args.iter().map(|s| s.to_string()).collect();
-    let out = cli::git(root, &argv, opts).await?;
-    if out.ok {
-        Ok(out)
-    } else {
-        let raw = format!("$ git {}\n\n{}{}", args.join(" "), out.stdout, out.stderr);
-        Err(GitFailure { summary: cli::explain(&format!("{}\n{}", out.stdout, out.stderr)), detail: raw }.into())
-    }
-}
-
-async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T> + Send + 'static) -> Result<T> {
-    tokio::task::spawn_blocking(f).await.map_err(|e| anyhow!("Background task failed: {e}"))?
-}
 
 // ───────────────────────────── state ─────────────────────────────
 
@@ -75,11 +46,14 @@ struct DiffPayload {
     summary: String,
     body: String,
     meta: String,
+    /// Line staging key: "staged:fingerprint:path", empty when unsupported.
+    select_key: String,
 }
 
 impl DiffPayload {
     fn from_view(v: git::DiffView) -> Self {
         let num = |n: Option<u32>| n.map(|n| SharedString::from(n.to_string())).unwrap_or_default();
+        let selectable = v.fingerprint.is_some();
         Self {
             lines: v
                 .lines
@@ -88,6 +62,8 @@ impl DiffPayload {
                     kind: l.kind,
                     old_no: if l.kind == git::kind::FILE { l.tag.into() } else { num(l.old_no) },
                     new_no: num(l.new_no),
+                    selectable: selectable && l.pos.is_some() && (l.kind == git::kind::ADD || l.kind == git::kind::DEL),
+                    selected: false,
                     text: l.text.into(),
                 })
                 .collect(),
@@ -117,6 +93,27 @@ enum Pending {
     Checkout { name: String, remote: bool },
     Revert(String),
     Amend,
+    Trust,
+    TakeSide { path: String, mine: bool },
+}
+
+fn select_key(change: &FileChange, fingerprint: u64) -> String {
+    format!("{}:{fingerprint:016x}:{}", u8::from(change.staged), change.path)
+}
+
+fn parse_select_key(key: &str) -> Option<(bool, u64, &str)> {
+    let (staged, rest) = key.split_once(':')?;
+    let (fp, path) = rest.split_once(':')?;
+    Some((staged == "1", u64::from_str_radix(fp, 16).ok()?, path))
+}
+
+/// Stable identity of a repository's "runs programs" findings, so trusting it
+/// once doesn't cover settings added later.
+fn trust_token(findings: &[String]) -> String {
+    use std::hash::{DefaultHasher, Hash, Hasher};
+    let mut h = DefaultHasher::new();
+    findings.hash(&mut h);
+    format!("{:016x}", h.finish())
 }
 
 #[derive(Default)]
@@ -137,6 +134,8 @@ struct State {
     branches: Vec<git::BranchInfo>,
     branch_query: String,
     watcher: Option<RepoWatcher>,
+    /// Config/hooks that run programs, until the user trusts this repository.
+    untrusted: Vec<String>,
     last_fetch: HashMap<PathBuf, i64>,
     recents: Vec<RepoItem>,
     // GitHub
@@ -320,6 +319,16 @@ impl App {
             )
         };
         st.set_theme_mode(theme);
+        {
+            let db = self.db();
+            let width = |key: &str| db.get(key).and_then(|v| v.parse::<f32>().ok()).map(|w| w.clamp(260.0, 720.0));
+            if let Some(w) = width("changes_width") {
+                st.set_changes_width(w);
+            }
+            if let Some(w) = width("history_width") {
+                st.set_history_width(w);
+            }
+        }
         st.set_version(env!("CARGO_PKG_VERSION").into());
         st.set_clone_root(self.st().clone_root.display().to_string().into());
         st.set_device_flow_available(github::device_client_id().is_some());
@@ -526,6 +535,73 @@ impl App {
         });
         on!(on_tab_changed, |app, t: i32| app.tab_changed(t));
         on!(on_show_dialog, |app, name: SharedString| app.show_dialog(&name));
+        on!(on_toggle_diff_line, |app, row: i32, shift: bool| app.toggle_diff_line(row, shift));
+        on!(on_stage_hunk, |app, row: i32| app.stage_hunk(row));
+        on!(on_stage_selected_lines, |app| app.stage_selected_lines());
+        on!(on_clear_line_selection, |app| app.with_diff_model(|st, model| {
+            for i in 0..model.row_count() {
+                if let Some(mut r) = model.row_data(i).filter(|r| r.selected) {
+                    r.selected = false;
+                    model.set_row_data(i, r);
+                }
+            }
+            st.set_diff_selected_count(0);
+            st.set_diff_anchor(-1);
+        }));
+        on!(on_take_side, |app, path: SharedString, mine: bool| {
+            let rebasing = app.st().summary.as_ref().is_some_and(|s| s.state == "Rebasing");
+            let whose = match (mine, rebasing) {
+                (true, false) => "your version (the branch you're on)",
+                (true, true) => "your version (the commit being rebased)",
+                (false, false) => "the incoming version",
+                (false, true) => "the version you're rebasing onto",
+            };
+            app.confirm(
+                Pending::TakeSide { path: path.to_string(), mine },
+                if mine { "Use your version?" } else { "Use their version?" },
+                &format!(
+                    "{path} becomes {whose} and is marked resolved. Edits you made to it by hand are lost. If that side deleted the file, it's deleted."
+                ),
+                if mine { "Use mine" } else { "Use theirs" },
+                true,
+            )
+        });
+        on!(on_pull_with, |app, mode: i32| {
+            app.ui(|_, st| st.set_dialog("".into()));
+            app.pull_mode(if mode == 2 { ops::PullMode::Rebase } else { ops::PullMode::Merge });
+        });
+        on!(on_review_trust, |app| {
+            let list = app.st().untrusted.clone();
+            if list.is_empty() {
+                return;
+            }
+            let items: String = list.iter().map(|l| format!("\n  • {l}")).collect();
+            app.confirm(
+                Pending::Trust,
+                "Trust this repository?",
+                &format!(
+                    "Its own Git settings make Git run these programs when you stage, commit, pull or push:{items}\n\nRepositories you cloned yourself rarely have these; ones you were sent as a folder or zip can. Only trust it if you know where it came from. Gitust asks again if the list changes."
+                ),
+                "Trust repository",
+                true,
+            )
+        });
+        {
+            let a = self.clone();
+            st.on_step_change(move |delta| a.step_change(delta));
+        }
+        {
+            let a = self.clone();
+            st.on_step_commit(move |delta| a.step_commit(delta));
+        }
+        on!(on_panel_resized, |app| {
+            if let Some(ui) = app.ui.upgrade() {
+                let st = ui.global::<AppState>();
+                let db = app.db();
+                let _ = db.set("changes_width", &st.get_changes_width().round().to_string());
+                let _ = db.set("history_width", &st.get_history_width().round().to_string());
+            }
+        });
 
         // Persist geometry when the window closes.
         let a = self.clone();
@@ -599,6 +675,25 @@ impl App {
                 self.simple_op("Reverting", vec!["revert", "--no-edit", &id], "Commit reverted")
             }
             Some(Pending::Amend) => self.commit(true),
+            Some(Pending::Trust) => {
+                let (root, list) = {
+                    let mut s = self.st();
+                    (s.repo.clone(), std::mem::take(&mut s.untrusted))
+                };
+                if let Some(root) = root {
+                    let _ = self.db().set(&format!("trust:{}", root.display()), &trust_token(&list));
+                }
+                self.ui(|_, st| st.set_untrusted_summary("".into()));
+                self.info("Repository trusted");
+            }
+            Some(Pending::TakeSide { path, mine }) => {
+                let rebasing = self.st().summary.as_ref().is_some_and(|s| s.state == "Rebasing");
+                self.op("Resolving", true, true, move |_, root, opts| async move {
+                    let root = root.ok_or_else(|| anyhow!("No repository"))?;
+                    ops::take_side(&root, &path, mine, rebasing, opts).await?;
+                    Ok(Some(format!("Resolved {path} with {} version", if mine { "your" } else { "their" })))
+                });
+            }
             None => {}
         }
     }
@@ -661,9 +756,9 @@ impl App {
         self.spawn(async move {
             app.ui(|_, st| st.set_repo_loading(true));
             let p = path.clone();
-            let res = blocking(move || git::summary(&git::open(&p)?)).await;
+            let res = blocking(move || read_repo(&p)).await;
             app.ui(|_, st| st.set_repo_loading(false));
-            let sum = match res {
+            let (sum, findings) = match res {
                 Ok(s) => s,
                 Err(e) => {
                     if report {
@@ -724,6 +819,7 @@ impl App {
                 st.set_status_error(false);
             });
             app.push_diff(DiffPayload::default(), false);
+            app.apply_trust(&root, findings);
             app.apply_summary(sum, true);
             app.push_recents();
             app.load_history(true);
@@ -759,11 +855,36 @@ impl App {
     async fn refresh_now(self: &Arc<Self>) {
         let Some(root) = self.repo() else { return };
         let r = root.clone();
-        match blocking(move || git::summary(&git::open(&r)?)).await {
-            Ok(sum) if self.repo().as_ref() == Some(&root) => self.apply_summary(sum, false),
+        match blocking(move || read_repo(&r)).await {
+            Ok((sum, findings)) if self.repo().as_ref() == Some(&root) => {
+                self.apply_trust(&root, findings);
+                self.apply_summary(sum, false)
+            }
             Ok(_) => {}
             Err(e) => self.fail(e),
         }
+    }
+
+    /// Records which programs this repository would make Git run, unless the
+    /// user already trusted exactly this set.
+    fn apply_trust(self: &Arc<Self>, root: &Path, findings: Vec<String>) {
+        let trusted = findings.is_empty()
+            || self.db().get(&format!("trust:{}", root.display())).as_deref() == Some(trust_token(&findings).as_str());
+        let list = if trusted { Vec::new() } else { findings };
+        let summary = {
+            let mut s = self.st();
+            if s.untrusted == list {
+                return;
+            }
+            s.untrusted = list.clone();
+            let mut names: Vec<String> =
+                list.iter().map(|l| l.split(" = ").next().unwrap_or(l).to_string()).take(4).collect();
+            if list.len() > 4 {
+                names.push(format!("+{} more", list.len() - 4));
+            }
+            names.join(", ")
+        };
+        self.ui(move |_, st| st.set_untrusted_summary(summary.into()));
     }
 
     fn apply_summary(self: &Arc<Self>, sum: git::Summary, opened: bool) {
@@ -846,9 +967,162 @@ impl App {
             st.set_detail_summary(p.summary.into());
             st.set_detail_body(p.body.into());
             st.set_detail_meta(p.meta.into());
-            // Fresh model per diff: scroll resets to the top, which is what you want for a new file.
-            st.set_diff(ModelRc::new(VecModel::from(p.lines)));
+            // The same key means the very same diff (a refresh after unrelated
+            // changes): keep the rows, so the scroll position and picked lines stay.
+            let same = !p.select_key.is_empty()
+                && st.get_diff_select_key() == p.select_key.as_str()
+                && st.get_diff().row_count() == p.lines.len();
+            if !same {
+                st.set_diff_select_key(p.select_key.as_str().into());
+                st.set_diff_can_select(!p.select_key.is_empty());
+                st.set_diff_selected_count(0);
+                st.set_diff_anchor(-1);
+                // Fresh model per diff: scroll resets to the top, which is what you want for a new file.
+                st.set_diff(ModelRc::new(VecModel::from(p.lines)));
+            }
         });
+    }
+
+    /// Runs `f` on the UI thread's current diff model. Call from the UI thread.
+    fn with_diff_model(&self, f: impl FnOnce(&AppState<'_>, &ModelRc<DiffLine>)) {
+        if let Some(ui) = self.ui.upgrade() {
+            let st = ui.global::<AppState>();
+            let model = st.get_diff();
+            f(&st, &model);
+        }
+    }
+
+    /// Click on a +/- row: toggle it; with Shift, set the range from the last
+    /// clicked row to the state that row has.
+    fn toggle_diff_line(&self, row: i32, shift: bool) {
+        self.with_diff_model(|st, model| {
+            let Some(clicked) = usize::try_from(row).ok().and_then(|i| model.row_data(i)) else { return };
+            if !clicked.selectable {
+                return;
+            }
+            let idx = row as usize;
+            let anchor = usize::try_from(st.get_diff_anchor()).ok().filter(|&a| a < model.row_count());
+            let (range, value) = match anchor {
+                Some(a) if shift => (a.min(idx)..=a.max(idx), model.row_data(a).is_some_and(|r| r.selected)),
+                _ => {
+                    st.set_diff_anchor(row);
+                    (idx..=idx, !clicked.selected)
+                }
+            };
+            for i in range {
+                if let Some(mut r) = model.row_data(i).filter(|r| r.selectable && r.selected != value) {
+                    r.selected = value;
+                    model.set_row_data(i, r);
+                }
+            }
+            let count = model.iter().filter(|r| r.selected).count();
+            st.set_diff_selected_count(count as i32);
+        });
+    }
+
+    fn stage_hunk(self: &Arc<Self>, header_row: i32) {
+        let mut rows = Vec::new();
+        let mut key = String::new();
+        self.with_diff_model(|st, model| {
+            key = st.get_diff_select_key().to_string();
+            let start = usize::try_from(header_row).unwrap_or(usize::MAX).saturating_add(1);
+            for i in start..model.row_count() {
+                let Some(r) = model.row_data(i) else { break };
+                if r.kind == git::kind::HUNK || r.kind == git::kind::FILE {
+                    break;
+                }
+                if r.selectable {
+                    rows.push(i);
+                }
+            }
+        });
+        self.stage_rows(key, rows);
+    }
+
+    fn stage_selected_lines(self: &Arc<Self>) {
+        let mut rows = Vec::new();
+        let mut key = String::new();
+        self.with_diff_model(|st, model| {
+            key = st.get_diff_select_key().to_string();
+            rows = model.iter().enumerate().filter(|(_, r)| r.selected).map(|(i, _)| i).collect();
+        });
+        self.stage_rows(key, rows);
+    }
+
+    /// Stages/unstages diff rows of the file named by `key` (see `select_key`).
+    fn stage_rows(self: &Arc<Self>, key: String, rows: Vec<usize>) {
+        let Some((staged, fingerprint, path)) = parse_select_key(&key) else { return };
+        if rows.is_empty() {
+            return;
+        }
+        let (change, unborn) = {
+            let s = self.st();
+            let sum = s.summary.as_ref();
+            let change = sum.and_then(|x| {
+                let list = if staged { &x.staged } else { &x.unstaged };
+                list.iter().find(|c| c.path == path).cloned()
+            });
+            (change, sum.is_some_and(|x| x.unborn))
+        };
+        let Some(change) = change else {
+            self.info(format!("{path} changed; select the lines again"));
+            return;
+        };
+        self.op("Staging lines", true, true, move |_, root, opts| async move {
+            let root = root.ok_or_else(|| anyhow!("No repository"))?;
+            let n = ops::stage_lines(&root, change, fingerprint, rows, unborn, opts).await?;
+            let verb = if staged { "Unstaged" } else { "Staged" };
+            Ok(Some(format!("{verb} {n} line{}", if n == 1 { "" } else { "s" })))
+        });
+    }
+
+    /// Up/Down in the file list. Returns the row index to scroll to.
+    fn step_change(self: &Arc<Self>, delta: i32) -> i32 {
+        let (next, rows) = {
+            let s = self.st();
+            let Some(sum) = s.summary.as_ref() else { return -1 };
+            let files: Vec<&FileChange> = sum.staged.iter().chain(sum.unstaged.iter()).collect();
+            if files.is_empty() {
+                return -1;
+            }
+            let cur = s
+                .selected
+                .as_ref()
+                .and_then(|sel| files.iter().position(|c| c.path == sel.path && c.staged == sel.staged));
+            let i = match cur {
+                Some(i) => (i as i32 + delta).clamp(0, files.len() as i32 - 1) as usize,
+                None => 0,
+            };
+            (files[i].clone(), change_rows(sum))
+        };
+        self.select_change(&next.path, next.staged);
+        rows.iter()
+            .position(|r| !r.header && r.path == next.path.as_str() && r.staged == next.staged)
+            .map_or(-1, |i| i as i32)
+    }
+
+    /// Up/Down in the (filtered) history list. Returns the row index to scroll to.
+    fn step_commit(self: &Arc<Self>, delta: i32) -> i32 {
+        let next = {
+            let s = self.st();
+            let visible: Vec<&git::CommitInfo> =
+                s.commits.iter().filter(|c| commit_matches(c, &s.history_query)).collect();
+            if visible.is_empty() {
+                return -1;
+            }
+            let cur = s.selected_commit.as_ref().and_then(|id| visible.iter().position(|c| &c.id == id));
+            let i = match cur {
+                Some(i) => (i as i32 + delta).clamp(0, visible.len() as i32 - 1) as usize,
+                None => 0,
+            };
+            (i, visible[i].id.clone(), i + 1 == visible.len())
+        };
+        let (i, id, last) = next;
+        self.select_commit(id);
+        if last {
+            self.load_history(false);
+        }
+        i as i32
     }
 
     fn select_change(self: &Arc<Self>, path: &str, staged: bool) {
@@ -892,13 +1166,16 @@ impl App {
         }
         let app = self.clone();
         self.spawn(async move {
-            let res = blocking(move || git::file_diff(&git::open(&root)?, &change, force)).await;
+            let c = change.clone();
+            let res = blocking(move || git::file_diff(&git::open(&root)?, &c, force)).await;
             if app.file_seq.load(Ordering::SeqCst) != seq {
                 return; // a newer selection superseded this one
             }
             match res {
                 Ok(view) => {
+                    let key = view.fingerprint.map(|fp| select_key(&change, fp)).unwrap_or_default();
                     let mut p = DiffPayload::from_view(view);
+                    p.select_key = key;
                     p.title = header.title;
                     p.dir = header.dir;
                     p.status = header.status;
@@ -1020,16 +1297,10 @@ impl App {
     fn push_commits(&self) {
         let items: Vec<CommitItem> = {
             let s = self.st();
-            let q = s.history_query.trim().to_lowercase();
             let now = util::now();
             s.commits
                 .iter()
-                .filter(|c| {
-                    q.is_empty()
-                        || c.summary.to_lowercase().contains(&q)
-                        || c.author.to_lowercase().contains(&q)
-                        || c.id.starts_with(&q)
-                })
+                .filter(|c| commit_matches(c, &s.history_query))
                 .map(|c| CommitItem {
                     id: sh(c.id.clone()),
                     short_id: sh(c.id[..7.min(c.id.len())].to_string()),
@@ -1099,6 +1370,11 @@ impl App {
         self.spawn(async move {
             let root = app.repo();
             if needs_repo && root.is_none() {
+                return;
+            }
+            // Git would run the repository's own programs (hooks, fsmonitor, filters…).
+            if needs_repo && !app.st().untrusted.is_empty() {
+                app.info("This repository runs programs through its Git settings. Review it (red banner) before Gitust runs Git here.");
                 return;
             }
             let _guard = if quiet {
@@ -1180,37 +1456,35 @@ impl App {
             }
             s.summary.as_ref().is_some_and(|x| x.unborn)
         };
-        self.op("Staging", true, true, move |_, root, mut opts| async move {
-            opts.stdin = Some(cli::nul_paths(&paths));
-            opts.literal_pathspecs = true;
-            let args: &[&str] = match (stage, unborn) {
-                (true, _) => &["add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"],
-                (false, false) => &["reset", "-q", "--pathspec-from-file=-", "--pathspec-file-nul"],
-                (false, true) => &["rm", "--cached", "-r", "-q", "--pathspec-from-file=-", "--pathspec-file-nul"],
-            };
-            git_ok(root.as_deref(), args, opts).await.map(|_| None)
+        self.op("Staging", true, true, move |_, root, opts| async move {
+            let root = root.ok_or_else(|| anyhow!("No repository"))?;
+            if stage {
+                ops::stage_paths(&root, &paths, opts).await?;
+            } else {
+                ops::unstage_paths(&root, &paths, unborn, opts).await?;
+            }
+            Ok(None)
         });
     }
 
     fn stage_all(self: &Arc<Self>, stage: bool) {
         let unborn = self.st().summary.as_ref().is_some_and(|x| x.unborn);
         self.op("Staging", true, true, move |_, root, opts| async move {
-            let args: &[&str] = match (stage, unborn) {
-                (true, _) => &["add", "-A"],
-                (false, false) => &["reset", "-q"],
-                (false, true) => &["rm", "--cached", "-r", "-q", "--", "."],
-            };
-            git_ok(root.as_deref(), args, opts).await.map(|_| None)
+            let root = root.ok_or_else(|| anyhow!("No repository"))?;
+            if stage {
+                ops::stage_all(&root, opts).await?
+            } else {
+                ops::unstage_all(&root, unborn, opts).await?
+            }
+            Ok(None)
         });
     }
 
     fn discard(self: &Arc<Self>, path: String) {
-        self.op("Discarding", true, true, move |_, root, mut opts| async move {
-            opts.stdin = Some(cli::nul_paths(&[path.as_str()]));
-            opts.literal_pathspecs = true;
-            git_ok(root.as_deref(), &["restore", "--worktree", "--pathspec-from-file=-", "--pathspec-file-nul"], opts)
-                .await
-                .map(|_| Some(format!("Discarded changes to {path}")))
+        self.op("Discarding", true, true, move |_, root, opts| async move {
+            let root = root.ok_or_else(|| anyhow!("No repository"))?;
+            ops::discard(&root, &path, opts).await?;
+            Ok(Some(format!("Discarded changes to {path}")))
         });
     }
 
@@ -1283,16 +1557,9 @@ impl App {
                 return;
             }
             let message = if body.is_empty() { summary } else { format!("{summary}\n\n{body}") };
-            app.op("Committing", false, true, move |app, root, mut opts| async move {
-                opts.stdin = Some(message.into_bytes());
-                let mut args = vec!["commit", "-F", "-"];
-                if amend {
-                    args.push("--amend");
-                }
-                let out = git_ok(root.as_deref(), &args, opts).await?;
-                // "[main 1a2b3c4] Summary" → "1a2b3c4"
-                let first = out.stdout.lines().next().unwrap_or("").to_string();
-                let sha = first.split(']').next().and_then(|x| x.split_whitespace().last()).unwrap_or("").to_string();
+            app.op("Committing", false, true, move |app, root, opts| async move {
+                let root = root.ok_or_else(|| anyhow!("No repository"))?;
+                let sha = ops::commit(&root, message, amend, opts).await?;
                 app.ui(|_, st| {
                     st.set_commit_summary("".into());
                     st.set_commit_body("".into());
@@ -1333,11 +1600,26 @@ impl App {
     }
 
     fn pull(self: &Arc<Self>) {
-        self.op("Pulling", false, true, |app, root, opts| async move {
-            let res = git_ok(root.as_deref(), &["pull", "--progress"], opts).await;
+        self.pull_mode(ops::PullMode::Default);
+    }
+
+    /// `Default` follows the user's Git config; if Git stops because the branches
+    /// diverged and no strategy is configured, ask instead of failing.
+    fn pull_mode(self: &Arc<Self>, mode: ops::PullMode) {
+        self.op("Pulling", false, true, move |app, root, opts| async move {
+            let root = root.ok_or_else(|| anyhow!("No repository"))?;
+            let res = ops::pull(&root, mode, opts).await;
             app.load_history(true);
             app.load_branches();
-            let out = res?;
+            let out = match res {
+                Err(e) if mode == ops::PullMode::Default && ops::is_divergence(&e) => {
+                    app.st().last_fetch.insert(root, util::now());
+                    app.ui(|_, st| st.set_dialog("pull-diverged".into()));
+                    return Ok(Some("Branches diverged — choose merge or rebase".into()));
+                }
+                r => r?,
+            };
+            let root = Some(root);
             if let Some(r) = root {
                 app.st().last_fetch.insert(r, util::now());
             }
@@ -1404,17 +1686,14 @@ impl App {
             s.branches.iter().any(|b| !b.is_remote && b.name == local)
         };
         self.op("Switching branch", false, true, move |app, root, opts| async move {
+            let root = root.ok_or_else(|| anyhow!("No repository"))?;
             let local = if remote {
                 name.split_once('/').map(|x| x.1.to_string()).unwrap_or(name.clone())
             } else {
                 name.clone()
             };
-            if !git::valid_branch_name(&local) {
-                bail!("'{local}' isn't a valid branch name");
-            }
-            let args: Vec<&str> =
-                if remote && !local_exists { vec!["switch", "--track", &name] } else { vec!["switch", &local] };
-            git_ok(root.as_deref(), &args, opts).await?;
+            let track = (remote && !local_exists).then_some(name.as_str());
+            ops::switch(&root, &local, track, opts).await?;
             app.load_history(true);
             app.load_branches();
             Ok(Some(format!("Switched to {local}")))
@@ -1988,6 +2267,19 @@ impl App {
 }
 
 // ───────────────────────────── free helpers ─────────────────────────────
+
+fn read_repo(path: &Path) -> Result<(git::Summary, Vec<String>)> {
+    let repo = git::open(path)?;
+    Ok((git::summary(&repo)?, git::programs_run_by_repo(&repo)))
+}
+
+fn commit_matches(c: &git::CommitInfo, query: &str) -> bool {
+    let q = query.trim().to_lowercase();
+    q.is_empty()
+        || c.summary.to_lowercase().contains(&q)
+        || c.author.to_lowercase().contains(&q)
+        || c.id.starts_with(&q)
+}
 
 fn app_slug(s: &State) -> Option<String> {
     s.summary.as_ref().and_then(|x| x.github_slug.clone())

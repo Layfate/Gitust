@@ -2,11 +2,12 @@
 //! and must run on a worker thread. Mutations that should honour hooks, filters
 //! (LFS, autocrlf) and signing go through the Git CLI instead (see `cli.rs`).
 
+use crate::patch;
 use crate::util;
 use anyhow::{Result, anyhow, bail};
 use git2::{
-    BranchType, Delta, DiffFindOptions, DiffFormat, DiffOptions, ErrorCode, Oid, Repository, RepositoryState, Sort,
-    StatusOptions,
+    AttrCheckFlags, AttrValue, BranchType, Delta, DiffFindOptions, DiffFormat, DiffOptions, ErrorCode, FileMode, Oid,
+    Repository, RepositoryState, Sort, StatusOptions,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -72,10 +73,13 @@ pub struct Line {
     pub text: String,
     /// File-header rows only: "added", "deleted", "renamed", ...
     pub tag: &'static str,
+    /// `(hunk, line within hunk)` for context/`+`/`-` rows: the key into
+    /// [`patch::FileDiff`] used by line staging.
+    pub pos: Option<(u32, u32)>,
 }
 
 fn note(text: &str) -> Line {
-    Line { kind: kind::NOTE, old_no: None, new_no: None, text: text.to_string(), tag: "" }
+    Line { kind: kind::NOTE, old_no: None, new_no: None, text: text.to_string(), tag: "", pos: None }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -88,6 +92,9 @@ pub struct DiffView {
     pub dels: usize,
     pub files: usize,
     pub max_chars: usize,
+    /// Set when individual lines of this diff can be staged/unstaged; identifies
+    /// the exact diff the user is selecting on.
+    pub fingerprint: Option<u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -304,9 +311,19 @@ fn head_tree(repo: &Repository) -> Result<Option<git2::Tree<'_>>> {
 
 /// Diff of one file: HEAD→index when staged, index→worktree otherwise.
 pub fn file_diff(repo: &Repository, change: &FileChange, force: bool) -> Result<DiffView> {
+    Ok(file_diff_with_source(repo, change, force)?.0)
+}
+
+/// [`file_diff`] plus the raw hunks for line staging, when the file supports it
+/// (then `view.fingerprint` is set and every `+`/`-` row carries its `pos`).
+pub fn file_diff_with_source(
+    repo: &Repository,
+    change: &FileChange,
+    force: bool,
+) -> Result<(DiffView, Option<patch::FileDiff>)> {
     let root = workdir(repo);
     if change.status == 'U' {
-        return conflict_view(&root.join(&change.path));
+        return Ok((conflict_view(&root.join(&change.path))?, None));
     }
     if !change.staged
         && !force
@@ -314,9 +331,111 @@ pub fn file_diff(repo: &Repository, change: &FileChange, force: bool) -> Result<
         && md.is_file()
         && md.len() > LARGE_FILE_BYTES
     {
-        return Ok(DiffView { too_large: Some(md.len()), ..Default::default() });
+        return Ok((DiffView { too_large: Some(md.len()), ..Default::default() }, None));
     }
+    let diff = change_diff(repo, change)?;
+    let mut view = render(&diff, false)?;
+    // Any doubt about the file means no line staging, never a wrong patch.
+    let source = line_source(repo, change, &diff, &view).ok().flatten();
+    view.fingerprint = source.as_ref().map(patch::FileDiff::fingerprint);
+    Ok((view, source))
+}
 
+fn regular(mode: FileMode) -> bool {
+    matches!(mode, FileMode::Blob | FileMode::BlobExecutable)
+}
+
+/// Attributes under which libgit2's view of the content may differ from what
+/// `git apply`/`git add` would store (external filters, encodings, keyword expansion).
+fn has_content_filters(repo: &Repository, path: &str) -> bool {
+    ["filter", "working-tree-encoding", "ident"].iter().any(|name| {
+        match repo.get_attr_bytes(Path::new(path), name, AttrCheckFlags::FILE_THEN_INDEX) {
+            Ok(v) => !matches!(AttrValue::from_bytes(v), AttrValue::Unspecified | AttrValue::False),
+            Err(_) => true,
+        }
+    })
+}
+
+/// Raw hunks for line staging, cross-checked row by row against the rendered view.
+fn line_source(
+    repo: &Repository,
+    change: &FileChange,
+    diff: &git2::Diff<'_>,
+    view: &DiffView,
+) -> Result<Option<patch::FileDiff>> {
+    if !matches!(change.status, 'M' | 'A' | 'D' | '?')
+        || change.old_path.is_some()
+        || view.binary
+        || view.truncated
+        || view.too_large.is_some()
+        || diff.deltas().len() != 1
+        || has_content_filters(repo, &change.path)
+    {
+        return Ok(None);
+    }
+    let Some(p) = git2::Patch::from_diff(diff, 0)? else { return Ok(None) };
+    let delta = p.delta();
+    if delta.flags().is_binary() {
+        return Ok(None);
+    }
+    let (old_absent, new_absent) = match delta.status() {
+        Delta::Modified => (false, false),
+        Delta::Added | Delta::Untracked => (true, false),
+        Delta::Deleted => (false, true),
+        _ => return Ok(None),
+    };
+    let (old_mode, new_mode) = (delta.old_file().mode(), delta.new_file().mode());
+    if (!old_absent && !regular(old_mode)) || (!new_absent && !regular(new_mode)) {
+        return Ok(None);
+    }
+    let mut fd = patch::FileDiff {
+        hunks: Vec::with_capacity(p.num_hunks()),
+        old_absent,
+        new_absent,
+        mode: u32::from(if new_absent { old_mode } else { new_mode }),
+    };
+    for h in 0..p.num_hunks() {
+        let (hunk, n) = p.hunk(h)?;
+        let mut lines = Vec::with_capacity(n);
+        for l in 0..n {
+            let line = p.line_in_hunk(h, l)?;
+            if let o @ (' ' | '+' | '-') = line.origin() {
+                lines.push(patch::PLine { origin: o as u8, content: line.content().to_vec() });
+            }
+        }
+        fd.hunks.push(patch::PHunk {
+            old_start: hunk.old_start(),
+            old_lines: hunk.old_lines(),
+            new_start: hunk.new_start(),
+            new_lines: hunk.new_lines(),
+            lines,
+        });
+    }
+    if fd.hunks.is_empty() {
+        return Ok(None);
+    }
+    // The UI maps a clicked row to `pos`; prove that mapping matches these hunks.
+    let mut rows = 0;
+    for row in &view.lines {
+        let Some((h, l)) = row.pos else { continue };
+        let Some(raw) = fd.hunks.get(h as usize).and_then(|x| x.lines.get(l as usize)) else { return Ok(None) };
+        let kind = match raw.origin {
+            b'+' => kind::ADD,
+            b'-' => kind::DEL,
+            _ => kind::CONTEXT,
+        };
+        if kind != row.kind || clean_line(&raw.content) != row.text {
+            return Ok(None);
+        }
+        rows += 1;
+    }
+    if rows != fd.hunks.iter().map(|h| h.lines.len()).sum::<usize>() {
+        return Ok(None);
+    }
+    Ok(Some(fd))
+}
+
+fn change_diff<'r>(repo: &'r Repository, change: &FileChange) -> Result<git2::Diff<'r>> {
     let mut opts = DiffOptions::new();
     opts.pathspec(&change.path)
         .disable_pathspec_match(true)
@@ -337,7 +456,7 @@ pub fn file_diff(repo: &Repository, change: &FileChange, force: bool) -> Result<
     if change.old_path.is_some() {
         diff.find_similar(Some(DiffFindOptions::new().renames(true)))?;
     }
-    render(&diff, false)
+    Ok(diff)
 }
 
 fn clean_line(bytes: &[u8]) -> String {
@@ -372,6 +491,7 @@ fn render(diff: &git2::Diff<'_>, file_headers: bool) -> Result<DiffView> {
         v.files = stats.files_changed();
     }
     let mut current_file: Option<String> = None;
+    let (mut hunk_no, mut line_no) = (u32::MAX, 0u32);
 
     let result = diff.print(DiffFormat::Patch, |delta, _hunk, line| {
         if v.lines.len() >= MAX_DIFF_LINES {
@@ -391,15 +511,20 @@ fn render(diff: &git2::Diff<'_>, file_headers: bool) -> Result<DiffView> {
                     Delta::Typechange => ("type changed", path.clone()),
                     _ => ("modified", path.clone()),
                 };
-                v.lines.push(Line { kind: kind::FILE, old_no: None, new_no: None, text, tag: label });
+                v.lines.push(Line { kind: kind::FILE, old_no: None, new_no: None, text, tag: label, pos: None });
                 current_file = Some(path);
+                hunk_no = u32::MAX;
             }
         }
         let k = match line.origin() {
             '+' => kind::ADD,
             '-' => kind::DEL,
             ' ' => kind::CONTEXT,
-            'H' => kind::HUNK,
+            'H' => {
+                hunk_no = hunk_no.wrapping_add(1);
+                line_no = 0;
+                kind::HUNK
+            }
             'B' => {
                 v.binary = true;
                 v.lines.push(note("Binary file — no text diff"));
@@ -413,7 +538,11 @@ fn render(diff: &git2::Diff<'_>, file_headers: bool) -> Result<DiffView> {
         };
         let text = clean_line(line.content());
         v.max_chars = v.max_chars.max(text.chars().count());
-        v.lines.push(Line { kind: k, old_no: line.old_lineno(), new_no: line.new_lineno(), text, tag: "" });
+        let pos = (k != kind::HUNK && hunk_no != u32::MAX).then(|| {
+            line_no += 1;
+            (hunk_no, line_no - 1)
+        });
+        v.lines.push(Line { kind: k, old_no: line.old_lineno(), new_no: line.new_lineno(), text, tag: "", pos });
         true
     });
     match result {
@@ -465,7 +594,7 @@ fn conflict_view(path: &Path) -> Result<DiffView> {
             region
         };
         v.max_chars = v.max_chars.max(text.chars().count());
-        v.lines.push(Line { kind: k, old_no: None, new_no: Some(i as u32 + 1), text, tag: "" });
+        v.lines.push(Line { kind: k, old_no: None, new_no: Some(i as u32 + 1), text, tag: "", pos: None });
     }
     Ok(v)
 }
@@ -608,6 +737,85 @@ pub fn branches(repo: &Repository) -> Result<Vec<BranchInfo>> {
 
 pub fn valid_branch_name(name: &str) -> bool {
     !name.is_empty() && !name.starts_with('-') && git2::Branch::name_is_valid(name).unwrap_or(false)
+}
+
+/// Which sides of a conflicted path exist: `(ours, theirs)`. A missing side
+/// means that side deleted the file.
+pub fn conflict_sides(repo: &Repository, path: &str) -> Result<(bool, bool)> {
+    let index = repo.index()?;
+    for c in index.conflicts()? {
+        let c = c?;
+        let entry = c.our.as_ref().or(c.their.as_ref()).or(c.ancestor.as_ref());
+        if entry.is_some_and(|e| e.path == path.as_bytes()) {
+            return Ok((c.our.is_some(), c.their.is_some()));
+        }
+    }
+    bail!("{path} is no longer conflicted")
+}
+
+/// Repository-local settings and hooks that make Git run a program. A repository
+/// handed over as a zip can carry these, and they would run as soon as Gitust
+/// stages, commits, pulls or pushes. Libgit2 (used for every read) runs none of them.
+pub fn programs_run_by_repo(repo: &Repository) -> Vec<String> {
+    let mut found = Vec::new();
+    for file in [repo.commondir().join("config"), repo.path().join("config.worktree")] {
+        if !file.is_file() {
+            continue;
+        }
+        let Ok(cfg) = git2::Config::open(&file) else {
+            found.push(format!("{} could not be read", file.display()));
+            continue;
+        };
+        let Ok(mut entries) = cfg.entries(None) else { continue };
+        while let Some(Ok(e)) = entries.next() {
+            let (Ok(name), value) = (e.name(), e.value().unwrap_or("")) else { continue };
+            if config_runs_program(name, value) {
+                let v: String = value.chars().take(100).collect();
+                let more = if value.chars().count() > 100 { "…" } else { "" };
+                found.push(format!("{name} = {v}{more}"));
+            }
+        }
+    }
+    if let Ok(dir) = std::fs::read_dir(repo.commondir().join("hooks")) {
+        for entry in dir.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if entry.file_type().is_ok_and(|t| t.is_file()) && !name.ends_with(".sample") {
+                found.push(format!("hook: {name}"));
+            }
+        }
+    }
+    found.sort();
+    found.dedup();
+    found
+}
+
+fn config_runs_program(name: &str, value: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    let Some((section, rest)) = n.split_once('.') else { return false };
+    let sub = rest.contains('.');
+    let key = rest.rsplit('.').next().unwrap_or(rest);
+    let is_bool = matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "" | "true" | "false" | "yes" | "no" | "on" | "off" | "1" | "0"
+    );
+    match (section, key, sub) {
+        // `true` means Git's built-in daemon; anything else is a command.
+        ("core", "fsmonitor", false) => !is_bool,
+        (
+            "core",
+            "hookspath" | "sshcommand" | "gitproxy" | "askpass" | "editor" | "pager" | "alternaterefscommand",
+            false,
+        ) => true,
+        ("sequence", "editor", false) | ("diff", "external", false) | ("include", "path", false) => true,
+        ("uploadpack", "packobjectshook", false) => true,
+        ("credential", "helper", _) | ("gpg", "program", _) => true,
+        ("filter", "clean" | "smudge" | "process", true) => true,
+        ("diff", "textconv" | "command", true) | ("merge", "driver", true) => true,
+        ("remote", "uploadpack" | "receivepack", true) | ("includeif", "path", true) => true,
+        // `ext::` URLs run arbitrary commands.
+        ("protocol", "allow", true) => rest.starts_with("ext.") && !value.eq_ignore_ascii_case("never"),
+        _ => false,
+    }
 }
 
 #[cfg(test)]
