@@ -365,6 +365,46 @@ impl App {
             }
         }
         self.gh_restore_session();
+        let (enabled, last) = {
+            let db = self.db();
+            (
+                db.get("update_check").as_deref() != Some("0"),
+                db.get("update_last").and_then(|v| v.parse::<i64>().ok()).unwrap_or(0),
+            )
+        };
+        st.set_update_check(enabled);
+        if enabled && util::now() - last > 86_400 {
+            self.check_updates(false);
+        }
+    }
+
+    /// Asks GitHub for the latest release (at most daily unless `manual`).
+    /// Only shows a link; nothing is downloaded or installed.
+    fn check_updates(self: &Arc<Self>, manual: bool) {
+        let app = self.clone();
+        self.spawn(async move {
+            match github::latest_release().await {
+                Ok(found) => {
+                    let _ = app.db().set("update_last", &util::now().to_string());
+                    match found.filter(|(tag, _)| util::is_newer_version(tag, env!("CARGO_PKG_VERSION"))) {
+                        Some((tag, url)) => {
+                            let version = tag.trim_start_matches('v').to_string();
+                            crate::log::info(&format!("update available: {version}"));
+                            app.ui(move |_, st| {
+                                st.set_update_version(version.into());
+                                st.set_update_url(url.into());
+                            });
+                        }
+                        None if manual => {
+                            app.info(format!("Gitust {} is the latest version", env!("CARGO_PKG_VERSION")))
+                        }
+                        None => {}
+                    }
+                }
+                Err(e) if manual => app.fail(e.context("Couldn't check for updates")),
+                Err(e) => crate::log::info(&format!("update check skipped: {e:#}")),
+            }
+        });
     }
 
     pub fn save_window(&self, ui: &MainWindow) {
@@ -635,6 +675,11 @@ impl App {
             let a = self.clone();
             st.on_step_commit(move |delta| a.step_commit(delta));
         }
+        on!(on_check_updates, |app| app.check_updates(true));
+        on!(on_set_update_check, |app, on: bool| {
+            let _ = app.db().set("update_check", if on { "1" } else { "0" });
+            app.ui(move |_, st| st.set_update_check(on));
+        });
         on!(on_panel_resized, |app| {
             if let Some(ui) = app.ui.upgrade() {
                 let st = ui.global::<AppState>();

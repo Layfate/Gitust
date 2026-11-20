@@ -183,6 +183,10 @@ export global AppState {
     in-out property <string> clone-root;
     in-out property <int> theme-mode;
     in-out property <string> version;
+    // Set when a newer release exists (daily check, Settings → Updates).
+    in-out property <string> update-version;
+    in-out property <string> update-url;
+    in-out property <bool> update-check: true;
     in-out property <string> startup-time;
     in-out property <[PaletteItem]> palette-items;
     in-out property <int> palette-index;
@@ -275,4 +279,6 @@ export global AppState {
     callback step-commit(int) -> int;
     callback panel-resized();
     callback open-log();
+    callback check-updates();
+    callback set-update-check(bool);
 }

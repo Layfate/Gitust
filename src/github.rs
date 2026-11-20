@@ -149,6 +149,32 @@ pub async fn whoami(o: &Octocrab) -> Result<String> {
     Ok(get_json::<UserResp>(o, "/user").await?.login)
 }
 
+// ---------- updates ----------
+
+#[derive(Deserialize)]
+struct ReleaseResp {
+    tag_name: String,
+    html_url: String,
+    #[serde(default)]
+    draft: bool,
+    #[serde(default)]
+    prerelease: bool,
+}
+
+/// The latest published release of Gitust: `(tag, page url)`. Anonymous
+/// request; nothing about the user is sent. `None` if there is no release yet.
+pub async fn latest_release() -> Result<Option<(String, String)>> {
+    let crab = Octocrab::builder().build().map_err(|e| anyhow!("Couldn't create GitHub client: {e}"))?;
+    match get_json::<ReleaseResp>(&crab, "/repos/Layfate/Gitust/releases/latest").await {
+        Ok(r) if !r.draft && !r.prerelease && r.html_url.starts_with("https://github.com/") => {
+            Ok(Some((r.tag_name, r.html_url)))
+        }
+        Ok(_) => Ok(None),
+        Err(e) if e.to_string().starts_with("Not found") => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
 // ---------- repositories ----------
 
 #[derive(Deserialize, Serialize, Clone, Debug)]

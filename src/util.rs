@@ -159,6 +159,21 @@ pub fn percent_encode(s: &str) -> String {
     out
 }
 
+/// Whether release tag `latest` (e.g. `v0.2.0`) is newer than `current`
+/// (`0.1.0`). Pre-release suffixes (`-beta.1`) never count as newer, so
+/// people on stable builds are only told about stable releases.
+pub fn is_newer_version(latest: &str, current: &str) -> bool {
+    fn parse(v: &str) -> Option<(u64, u64, u64)> {
+        let v = v.trim().trim_start_matches(['v', 'V']);
+        if v.contains('-') {
+            return None;
+        }
+        let mut it = v.split('.').map(|p| p.parse::<u64>().ok());
+        Some((it.next()??, it.next().flatten().unwrap_or(0), it.next().flatten().unwrap_or(0)))
+    }
+    matches!((parse(latest), parse(current)), (Some(l), Some(c)) if l > c)
+}
+
 /// Subsequence fuzzy match with bonuses for word starts and consecutive runs.
 /// Returns `None` when `query` is not a subsequence of `text`.
 pub fn fuzzy_score(query: &str, text: &str) -> Option<i32> {
@@ -222,6 +237,17 @@ mod tests {
         assert_eq!(relative_time(100, 110), "just now");
         assert_eq!(relative_time(0, 7200), "2h ago");
         assert_eq!(datetime(0, 90), "1970-01-01 01:30 +0130");
+    }
+
+    #[test]
+    fn versions() {
+        assert!(is_newer_version("v0.2.0", "0.1.0"));
+        assert!(is_newer_version("0.10.0", "0.9.9"));
+        assert!(is_newer_version("v1", "0.9.0"));
+        assert!(!is_newer_version("v0.1.0", "0.1.0"));
+        assert!(!is_newer_version("v0.0.9", "0.1.0"));
+        assert!(!is_newer_version("v0.3.0-beta.1", "0.2.0"));
+        assert!(!is_newer_version("nightly", "0.1.0"));
     }
 
     #[test]

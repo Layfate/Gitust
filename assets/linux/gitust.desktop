@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Gitust
+GenericName=Git client
+Comment=A tiny, native Git & GitHub client
+Exec=gitust %F
+Icon=gitust
+Terminal=false
+Categories=Development;RevisionControl;
+Keywords=git;github;version control;
+StartupWMClass=gitust

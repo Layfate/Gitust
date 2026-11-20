@@ -1,4 +1,4 @@
-import { LineEdit, TextEdit, ListView, AboutSlint } from "std-widgets.slint";
+import { LineEdit, TextEdit, ListView, AboutSlint, CheckBox } from "std-widgets.slint";
 import { T } from "theme.slint";
 import { AppState, PaletteItem } from "state.slint";
 import { FlatButton, IconButton, HDivider, SectionLabel, Spacer } from "widgets.slint";
@@ -314,6 +314,26 @@ export component SettingsDialog inherits Modal {
         if !AppState.gh-signed-in: FlatButton {
             text: "Connect";
             clicked => { AppState.dialog = ""; AppState.tab = 3; AppState.tab-changed(3); }
+        }
+    }
+
+    SectionLabel { text: "UPDATES"; }
+    HorizontalLayout {
+        spacing: 8px;
+        CheckBox {
+            text: "Check for a new version once a day";
+            checked: AppState.update-check;
+            toggled => { AppState.set-update-check(self.checked); }
+        }
+        Spacer { }
+        if AppState.update-version != "": FlatButton {
+            primary: true;
+            text: "Get " + AppState.update-version;
+            clicked => { AppState.open-url(AppState.update-url); }
+        }
+        FlatButton {
+            text: "Check now";
+            clicked => { AppState.check-updates(); }
         }
     }
 

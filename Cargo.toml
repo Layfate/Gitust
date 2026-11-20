@@ -9,6 +9,19 @@ rust-version = "1.88"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/Layfate/Gitust"
 
+# Linux .deb (built by .github/workflows/release.yml with cargo-deb).
+[package.metadata.deb]
+maintainer = "Layfate <343918192+Layfate@users.noreply.github.com>"
+section = "devel"
+depends = "$auto, git"
+extended-description = "Gitust keeps the everyday Git flow (see what changed, stage files, hunks or lines, commit, branch, push) in a native window that starts fast and idles at about 10 MB of memory. GitHub is optional."
+assets = [
+    ["target/release/gitust", "usr/bin/", "755"],
+    ["assets/linux/gitust.desktop", "usr/share/applications/", "644"],
+    ["assets/gitust-512.png", "usr/share/icons/hicolor/512x512/apps/gitust.png", "644"],
+    ["README.md", "usr/share/doc/gitust/README.md", "644"],
+]
+
 [dependencies]
 anyhow = "1.0.104"
 dirs = "7.0.0"

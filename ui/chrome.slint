@@ -518,6 +518,18 @@ export component StatusBar inherits Rectangle {
             }
         }
 
+        if AppState.update-version != "": update-ta := TouchArea {
+            width: update-text.preferred-width + 8px;
+            mouse-cursor: MouseCursor.pointer;
+            clicked => { AppState.open-url(AppState.update-url); }
+            update-text := Text {
+                text: "Gitust " + AppState.update-version + " is available";
+                color: update-ta.has-hover ? T.fg : T.brand;
+                font-size: T.fs-sm;
+                font-weight: 600;
+            }
+        }
+
         HorizontalLayout {
             spacing: 6px;
             VerticalLayout {

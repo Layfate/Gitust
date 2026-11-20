@@ -127,15 +127,22 @@ The device-flow button appears only when a GitHub OAuth App client ID is configu
 
 The other two sign-in methods (GitHub CLI session, personal access token) work without this.
 
-### Windows release files
+### Release files
 
-`.github/workflows/release.yml` builds them on GitHub Actions: push a tag such as `v0.1.0` to get a **draft** release, or run the workflow by hand to get them as a build artifact.
+`.github/workflows/release.yml` builds them on GitHub Actions: push a tag such as `v0.1.0` to get a **draft** release with everything attached, or run the workflow by hand to get them as build artifacts.
 
-- `Gitust-<version>-windows-x64-portable.zip`: unzip anywhere and run. The `portable` file next to `gitust.exe` keeps settings in a `data` folder beside it (delete the file to use your profile instead). Build it locally with `cargo build --release` then `./scripts/package.ps1`.
-- `Gitust-<version>-windows-x64.msi`: installs to Program Files with a Start-menu shortcut; newer versions upgrade in place. Built from `installer/gitust.wxs` with WiX 5.
-- `SHA256SUMS.txt`
+| Platform | Files |
+|---|---|
+| Windows | `…-windows-x64.msi` (installs to Program Files with a Start-menu shortcut; newer versions upgrade in place) · `…-windows-x64-portable.zip` (unzip and run; the `portable` file keeps settings in a `data` folder next to `gitust.exe`) |
+| Linux *(preview)* | `.deb` · `.AppImage` · `.tar.gz` (x86_64, built on Ubuntu 22.04) |
+| macOS *(preview)* | `.dmg` with a universal `Gitust.app` (Apple Silicon + Intel) |
+| All | `SHA256SUMS.txt` |
 
-Set the repository variable `GITUST_GITHUB_CLIENT_ID` to build browser sign-in into release builds. The files aren't code-signed yet, so Windows SmartScreen warns on first run.
+Linux and macOS builds pass the full test suite in CI but haven't been tried on real machines yet. Nothing is code-signed yet, so Windows SmartScreen warns on first run and macOS needs right-click → Open the first time.
+
+Set the repository variable `GITUST_GITHUB_CLIENT_ID` to build browser sign-in into release builds. Build the Windows zip locally with `cargo build --release` then `./scripts/package.ps1`.
+
+Gitust checks GitHub once a day for a newer release and, if there is one, shows a link in the status bar. It never downloads or installs anything by itself; turn the check off in Settings.
 
 ## Architecture
 
@@ -186,7 +193,8 @@ Design rules:
 - Opens your system terminal rather than embedding one
 - No built-in merge editor: conflicts can be resolved by taking one side whole, otherwise in your editor
 - Developed and tested on Windows 11. The CI workflow targets Linux and macOS too, but neither has been built or tried yet
-- Windows: portable zip and MSI, unsigned; no auto-update. No Linux/macOS packages yet
+- Releases aren't code-signed yet; updates are announced, not installed automatically
+- Linux and macOS packages are untested previews
 
 ## License
 
