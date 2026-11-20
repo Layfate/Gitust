@@ -2,6 +2,7 @@ name: Audit
 
 # Checks Cargo.lock against the RustSec advisory database: on dependency
 # changes, and weekly so new advisories for existing dependencies show up.
+# Vulnerabilities fail the job; "unmaintained" notices are only warnings.
 on:
   push:
     branches: [main]
@@ -14,14 +15,13 @@ on:
 
 permissions:
   contents: read
-  issues: write
-  checks: write
 
 jobs:
   audit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: rustsec/audit-check@v2
+      - uses: taiki-e/install-action@v2
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          tool: cargo-audit
+      - run: cargo audit

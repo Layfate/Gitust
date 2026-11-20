@@ -1,4 +1,4 @@
-import { ListView, LineEdit, TextEdit, CheckBox, Spinner } from "std-widgets.slint";
+import { ListView, LineEdit, TextEdit, CheckBox, Spinner, ComboBox } from "std-widgets.slint";
 import { T } from "theme.slint";
 import { AppState, ChangeRow, DiffLine, CommitItem, BranchItem, GhRepoItem, GhItem } from "state.slint";
 import { IconButton, FlatButton, Chip, Counter, StatusBadge, HDivider, VDivider, SectionLabel, EmptyState, Banner, Spacer, TabButton, Splitter, LineCheck } from "widgets.slint";
@@ -980,7 +980,7 @@ component SignInPanel inherits VerticalLayout {
                     VerticalLayout {
                         alignment: center;
                         Text {
-                            text: "Connect GitHub";
+                            text: AppState.gh-adding-account ? "Add another GitHub account" : "Connect GitHub";
                             font-size: T.fs-xl;
                             font-weight: 700;
                             color: T.fg;
@@ -1087,6 +1087,13 @@ component SignInPanel inherits VerticalLayout {
                     text: AppState.gh-error;
                     color: T.red;
                     wrap: word-wrap;
+                }
+                if AppState.gh-adding-account: HorizontalLayout {
+                    alignment: end;
+                    FlatButton {
+                        text: "Cancel";
+                        clicked => { AppState.gh-cancel-add-account(); }
+                    }
                 }
             }
         }
@@ -1233,10 +1240,10 @@ component GhItemRow inherits Rectangle {
 }
 
 export component GitHubView inherits VerticalLayout {
-    if !AppState.gh-signed-in: SignInPanel {
+    if !AppState.gh-signed-in || AppState.gh-adding-account: SignInPanel {
         vertical-stretch: 1;
     }
-    if AppState.gh-signed-in: VerticalLayout {
+    if AppState.gh-signed-in && !AppState.gh-adding-account: VerticalLayout {
         HorizontalLayout {
             padding-left: 10px;
             padding-right: 12px;
@@ -1298,10 +1305,35 @@ export component GitHubView inherits VerticalLayout {
             padding-left: 16px;
             padding-right: 16px;
             padding-bottom: 8px;
+            spacing: 8px;
             LineEdit {
                 placeholder-text: AppState.gh-tab == 0 ? "Filter repositories" : "Filter";
                 text <=> AppState.gh-query;
                 edited(t) => { AppState.gh-filter(t); }
+            }
+            // Accounts only change what the GitHub views show; pushes and pulls use
+            // Git's own credentials.
+            if AppState.has-repo: VerticalLayout {
+                alignment: center;
+                CheckBox {
+                    text: "Use for this repository";
+                    checked: AppState.gh-account-pinned;
+                    toggled => { AppState.gh-pin-account(self.checked); }
+                }
+            }
+            ComboBox {
+                width: 190px;
+                model: AppState.gh-accounts;
+                current-value: AppState.gh-login;
+                selected(login) => { AppState.gh-switch-account(login); }
+            }
+            VerticalLayout {
+                alignment: center;
+                IconButton {
+                    icon: @image-url("icons/plus.svg");
+                    label: "Add another GitHub account";
+                    clicked => { AppState.gh-add-account(); }
+                }
             }
         }
         if AppState.gh-error != "": HorizontalLayout {

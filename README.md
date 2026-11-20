@@ -51,6 +51,7 @@ Fair print: "window visible" is when the OS reports a window, and an Electron wi
 **GitHub (optional)**
 - Sign in with your existing **GitHub CLI** session, a **personal access token**, or the **OAuth device flow**
 - Tokens live in the OS credential vault (Windows Credential Manager / macOS Keychain / Secret Service), never in plain files
+- **Several accounts**: switch between them in the GitHub tab, and pin one to a repository so it is picked automatically when you open it (pushes and pulls keep using Git's own credentials)
 - Browse your repositories (cached for instant, offline display) and clone or open them in one click
 - Open pull requests and issues for the current repository or everything involving you; notifications inbox
 - Open on GitHub, create a pull request from the current branch
@@ -181,7 +182,7 @@ Design rules:
 ## Known limitations / next steps
 
 - Line staging is off for renames, binary files, symlinks/submodules and files with `filter`, `working-tree-encoding` or `ident` attributes (stage those as whole files)
-- One GitHub account at a time; GitHub.com only (no Enterprise host setting)
+- GitHub.com only (no Enterprise host setting)
 - Opens your system terminal rather than embedding one
 - No built-in merge editor: conflicts can be resolved by taking one side whole, otherwise in your editor
 - Developed and tested on Windows 11. The CI workflow targets Linux and macOS too, but neither has been built or tried yet

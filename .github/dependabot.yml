@@ -4,6 +4,9 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      # Dev-only, kept on the version Slint already uses so it isn't built twice.
+      - dependency-name: resvg
     groups:
       # One PR for routine patch/minor bumps instead of a dozen.
       minor-and-patch:

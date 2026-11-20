@@ -10,26 +10,77 @@ use octocrab::secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 
 const VAULT_SERVICE: &str = "gitust";
-const VAULT_ACCOUNT: &str = "github.com";
+/// Before multiple accounts, the single token lived under this name.
+const LEGACY_VAULT_ACCOUNT: &str = "github.com";
 pub const SCOPES: [&str; 3] = ["repo", "read:org", "notifications"];
 
 // ---------- token vault (OS credential manager / keychain / secret service) ----------
 
-fn entry() -> Result<keyring::Entry> {
-    keyring::Entry::new(VAULT_SERVICE, VAULT_ACCOUNT).map_err(|e| anyhow!("Credential vault unavailable: {e}"))
+/// One vault entry per signed-in account: `github.com:<login>`.
+fn entry(login: &str) -> Result<keyring::Entry> {
+    keyring::Entry::new(VAULT_SERVICE, &format!("{LEGACY_VAULT_ACCOUNT}:{login}"))
+        .map_err(|e| anyhow!("Credential vault unavailable: {e}"))
 }
 
-pub fn load_token() -> Option<String> {
-    entry().ok()?.get_password().ok().filter(|t| !t.trim().is_empty())
+pub fn load_token(login: &str) -> Option<String> {
+    entry(login).ok()?.get_password().ok().filter(|t| !t.trim().is_empty())
 }
 
-pub fn save_token(token: &str) -> Result<()> {
-    entry()?.set_password(token).map_err(|e| anyhow!("Couldn't save the token to the credential vault: {e}"))
+pub fn save_token(login: &str, token: &str) -> Result<()> {
+    entry(login)?.set_password(token).map_err(|e| anyhow!("Couldn't save the token to the credential vault: {e}"))
 }
 
-pub fn delete_token() {
-    if let Ok(e) = entry() {
+pub fn delete_token(login: &str) {
+    if let Ok(e) = entry(login) {
         let _ = e.delete_credential();
+    }
+}
+
+/// The token saved by versions with a single account, if any. Startup moves
+/// it to the per-account entry, then calls [`delete_legacy_token`].
+pub fn legacy_token() -> Option<String> {
+    keyring::Entry::new(VAULT_SERVICE, LEGACY_VAULT_ACCOUNT).ok()?.get_password().ok().filter(|t| !t.trim().is_empty())
+}
+
+pub fn delete_legacy_token() {
+    if let Ok(e) = keyring::Entry::new(VAULT_SERVICE, LEGACY_VAULT_ACCOUNT) {
+        let _ = e.delete_credential();
+    }
+}
+
+/// Signed-in accounts, most recently used first. Stored as JSON in settings;
+/// the tokens themselves are only ever in the vault.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Accounts {
+    pub logins: Vec<String>,
+}
+
+impl Accounts {
+    pub fn parse(json: Option<&str>) -> Self {
+        json.and_then(|j| serde_json::from_str(j).ok()).unwrap_or_default()
+    }
+
+    pub fn to_json(&self) -> String {
+        serde_json::to_string(self).unwrap_or_else(|_| "{\"logins\":[]}".into())
+    }
+
+    pub fn active(&self) -> Option<&str> {
+        self.logins.first().map(String::as_str)
+    }
+
+    /// Adds or re-selects `login` as the active account. GitHub logins are
+    /// case-insensitive, so `octocat` and `OctoCat` are the same account.
+    pub fn activate(&mut self, login: &str) {
+        self.logins.retain(|l| !l.eq_ignore_ascii_case(login));
+        self.logins.insert(0, login.to_string());
+    }
+
+    pub fn remove(&mut self, login: &str) {
+        self.logins.retain(|l| !l.eq_ignore_ascii_case(login));
+    }
+
+    pub fn find(&self, login: &str) -> Option<&str> {
+        self.logins.iter().find(|l| l.eq_ignore_ascii_case(login)).map(String::as_str)
     }
 }
 
@@ -338,6 +389,24 @@ impl DeviceLogin {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn account_list() {
+        let mut a = Accounts::parse(None);
+        assert_eq!(a.active(), None);
+        a.activate("octocat");
+        a.activate("work-me");
+        assert_eq!(a.active(), Some("work-me"));
+        // Re-selecting moves it to the front without duplicating; case-insensitive.
+        a.activate("OctoCat");
+        assert_eq!(a.logins, vec!["OctoCat", "work-me"]);
+        assert_eq!(a.find("octocat"), Some("OctoCat"));
+        let round = Accounts::parse(Some(&a.to_json()));
+        assert_eq!(round, a);
+        a.remove("OCTOCAT");
+        assert_eq!(a.active(), Some("work-me"));
+        assert_eq!(Accounts::parse(Some("not json")), Accounts::default());
+    }
 
     #[test]
     fn notification_urls() {

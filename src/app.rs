@@ -491,6 +491,32 @@ impl App {
             }
         });
         on!(on_gh_sign_out, |app| app.gh_sign_out());
+        on!(on_gh_switch_account, |app, login: SharedString| {
+            if !login.eq_ignore_ascii_case(&app.st().gh_login) {
+                app.gh_activate(login.to_string());
+            }
+        });
+        on!(on_gh_add_account, |app| app.ui(|_, st| {
+            st.set_gh_error("".into());
+            st.set_gh_adding_account(true);
+        }));
+        on!(on_gh_cancel_add_account, |app| {
+            if let Some(n) = app.st().device_cancel.take() {
+                n.notify_one();
+            }
+            app.ui(|_, st| st.set_gh_adding_account(false));
+        });
+        on!(on_gh_pin_account, |app, on: bool| {
+            let (root, login) = {
+                let s = app.st();
+                (s.repo.clone(), s.gh_login.clone())
+            };
+            if let Some(root) = root {
+                let key = format!("gh_account:{}", root.display());
+                let _ = if on { app.db().set(&key, &login) } else { app.db().remove_setting(&key) };
+            }
+            app.push_account_pin();
+        });
         on!(on_gh_refresh, |app| app.gh_load(true));
         on!(on_gh_tab_changed, |app, t: i32| {
             app.st().gh_tab = t;
@@ -840,6 +866,7 @@ impl App {
             app.push_recents();
             app.load_history(true);
             app.load_branches();
+            app.apply_account_pin(&root);
             if app.st().gh.is_some() {
                 app.st().gh_loaded.retain(|k, _| k == "repos");
             }
@@ -1976,61 +2003,123 @@ impl App {
 
     // ───────────────────────── GitHub ─────────────────────────
 
+    fn accounts(&self) -> github::Accounts {
+        github::Accounts::parse(self.db().get("gh_accounts").as_deref())
+    }
+
+    fn save_accounts(&self, accounts: &github::Accounts) {
+        let _ = self.db().set("gh_accounts", &accounts.to_json());
+        let logins: Vec<SharedString> = accounts.logins.iter().map(sh).collect();
+        self.ui(move |_, st| st.set_gh_accounts(ModelRc::new(VecModel::from(logins))));
+    }
+
     fn gh_restore_session(self: &Arc<Self>) {
-        let cached_login = self.db().get("gh_login");
+        let legacy_login = self.db().get("gh_login").filter(|l| !l.is_empty());
         let app = self.clone();
         self.spawn(async move {
-            let Some(token) = blocking(|| Ok(github::load_token())).await.ok().flatten() else { return };
-            let Ok(client) = github::client(&token) else { return };
-            // Show the cached identity immediately; verify in the background.
-            if let Some(login) = cached_login.clone() {
-                app.gh_set_session(client.clone(), login);
-            }
-            match github::whoami(&client).await {
-                Ok(login) => {
-                    if cached_login.as_deref() != Some(login.as_str()) {
-                        app.gh_set_session(client, login);
+            // One-time move of the single-account token to its per-account entry.
+            // The old entry is deleted only once the token is safely stored again.
+            if let Some(token) = blocking(|| Ok(github::legacy_token())).await.ok().flatten() {
+                let login = match legacy_login {
+                    Some(l) => Some(l),
+                    None => match github::client(&token) {
+                        Ok(c) => github::whoami(&c).await.ok(),
+                        Err(_) => None,
+                    },
+                };
+                if let Some(login) = login {
+                    let l = login.clone();
+                    if blocking(move || github::save_token(&l, &token)).await.is_ok() {
+                        let mut accounts = app.accounts();
+                        accounts.activate(&login);
+                        app.save_accounts(&accounts);
+                        let _ = blocking(|| {
+                            github::delete_legacy_token();
+                            Ok(())
+                        })
+                        .await;
+                        let _ = app.db().set("gh_login", "");
                     }
                 }
+            }
+            let accounts = app.accounts();
+            app.save_accounts(&accounts);
+            if let Some(login) = accounts.active() {
+                app.gh_activate(login.to_string());
+            }
+        });
+    }
+
+    /// Makes `login` the active account: its cached data shows at once, the
+    /// token is checked in the background.
+    fn gh_activate(self: &Arc<Self>, login: String) {
+        let app = self.clone();
+        self.spawn(async move {
+            let l = login.clone();
+            let token = blocking(move || Ok(github::load_token(&l))).await.ok().flatten();
+            let Some(client) = token.and_then(|t| github::client(&t).ok()) else {
+                app.gh_forget(&login);
+                app.fail(anyhow!(
+                    "The saved GitHub token for {login} is missing from the credential vault. Sign in again."
+                ));
+                return;
+            };
+            app.gh_set_session(client.clone(), login.clone());
+            match github::whoami(&client).await {
+                Ok(_) => {}
                 Err(e) if e.to_string().contains("rejected the token") => {
-                    github::delete_token();
-                    app.gh_clear_session();
+                    app.gh_forget(&login);
                     app.fail(e);
                 }
-                Err(e) => {
-                    if cached_login.is_none() {
-                        app.fail(e);
-                    } else {
-                        app.ui(|_, st| st.set_gh_error("Offline — showing cached data.".into()));
-                    }
-                }
+                Err(_) => app.ui(|_, st| st.set_gh_error("Offline — showing cached data.".into())),
             }
         });
     }
 
     fn gh_set_session(self: &Arc<Self>, client: octocrab::Octocrab, login: String) {
-        let _ = self.db().set("gh_login", &login);
+        let mut accounts = self.accounts();
+        accounts.activate(&login);
+        self.save_accounts(&accounts);
+        let cached = self.db().cache_get(&format!("repos:{login}"));
         {
             let mut s = self.st();
             s.gh = Some(client);
             s.gh_login = login.clone();
             s.gh_loaded.clear();
-            if s.gh_repos.is_empty()
-                && let Some((payload, _)) = self.db().cache_get("repos")
-            {
-                s.gh_repos = serde_json::from_str(&payload).unwrap_or_default();
-            }
+            s.gh_items.clear();
+            s.gh_repos = cached.and_then(|(payload, _)| serde_json::from_str(&payload).ok()).unwrap_or_default();
         }
         self.ui(move |_, st| {
             st.set_gh_signed_in(true);
             st.set_gh_login(login.into());
             st.set_gh_error("".into());
             st.set_signing_in(false);
+            st.set_gh_adding_account(false);
             st.set_device_code("".into());
+            st.set_gh_items(ModelRc::default());
         });
         self.push_gh_repos();
+        self.push_account_pin();
         if self.st().tab == 3 {
             self.gh_load(false);
+        }
+    }
+
+    /// Removes an account (token, cached data); switches to the next one if any.
+    fn gh_forget(self: &Arc<Self>, login: &str) {
+        let l = login.to_string();
+        std::thread::spawn(move || github::delete_token(&l));
+        let mut accounts = self.accounts();
+        accounts.remove(login);
+        self.save_accounts(&accounts);
+        let _ = self.db().cache_remove(&format!("repos:{login}"));
+        let was_active = self.st().gh_login.eq_ignore_ascii_case(login);
+        if !was_active {
+            return;
+        }
+        match accounts.active() {
+            Some(next) => self.gh_activate(next.to_string()),
+            None => self.gh_clear_session(),
         }
     }
 
@@ -2043,27 +2132,57 @@ impl App {
             s.gh_items.clear();
             s.gh_loaded.clear();
         }
-        let db = self.db();
-        let _ = db.cache_clear();
-        let _ = db.set("gh_login", "");
-        drop(db);
+        let _ = self.db().cache_clear();
         self.ui(|_, st| {
             st.set_gh_signed_in(false);
             st.set_gh_login("".into());
             st.set_gh_repos(ModelRc::default());
             st.set_gh_items(ModelRc::default());
             st.set_signing_in(false);
+            st.set_gh_adding_account(false);
             st.set_device_code("".into());
         });
+        self.push_account_pin();
     }
 
     async fn gh_finish_sign_in(self: &Arc<Self>, token: String) -> Result<()> {
         let client = github::client(&token)?;
         let login = github::whoami(&client).await?;
-        blocking(move || github::save_token(&token)).await?;
+        let l = login.clone();
+        blocking(move || github::save_token(&l, &token)).await?;
         self.gh_set_session(client, login.clone());
         self.info(format!("Signed in to GitHub as {login}"));
         Ok(())
+    }
+
+    /// Whether the open repository is set to always use the active account.
+    fn push_account_pin(&self) {
+        let (root, login) = {
+            let s = self.st();
+            (s.repo.clone(), s.gh_login.clone())
+        };
+        let pinned = root.is_some_and(|r| {
+            !login.is_empty()
+                && self.db().get(&format!("gh_account:{}", r.display())).is_some_and(|p| p.eq_ignore_ascii_case(&login))
+        });
+        self.ui(move |_, st| st.set_gh_account_pinned(pinned));
+    }
+
+    /// On opening a repository: switch to the account it is pinned to.
+    fn apply_account_pin(self: &Arc<Self>, root: &Path) {
+        let Some(pinned) = self.db().get(&format!("gh_account:{}", root.display())) else {
+            self.push_account_pin();
+            return;
+        };
+        let accounts = self.accounts();
+        let current = self.st().gh_login.clone();
+        match accounts.find(&pinned) {
+            Some(login) if !login.eq_ignore_ascii_case(&current) => {
+                self.info(format!("Using GitHub account {login} for this repository"));
+                self.gh_activate(login.to_string());
+            }
+            _ => self.push_account_pin(),
+        }
     }
 
     fn gh_begin(self: &Arc<Self>) {
@@ -2139,16 +2258,14 @@ impl App {
     }
 
     fn gh_sign_out(self: &Arc<Self>) {
-        let app = self.clone();
-        self.spawn(async move {
-            let _ = blocking(|| {
-                github::delete_token();
-                Ok(())
-            })
-            .await;
-            app.gh_clear_session();
-            app.info("Signed out of GitHub. To revoke the token itself, visit github.com/settings/applications.");
-        });
+        let login = self.st().gh_login.clone();
+        if login.is_empty() {
+            return;
+        }
+        self.gh_forget(&login);
+        self.info(format!(
+            "Signed {login} out of Gitust. To revoke the token itself, visit github.com/settings/applications."
+        ));
     }
 
     /// Loads the visible GitHub list if it's stale (or `force`). Never polls.
@@ -2181,7 +2298,8 @@ impl App {
                 if tab == 0 {
                     let repos = github::repos(&client).await?;
                     let json = serde_json::to_string(&repos)?;
-                    let _ = app.db().cache_put("repos", &json);
+                    let login = app.st().gh_login.clone();
+                    let _ = app.db().cache_put(&format!("repos:{login}"), &json);
                     let local = app.find_local_clones(&repos).await;
                     let mut s = app.st();
                     s.gh_repos = repos;

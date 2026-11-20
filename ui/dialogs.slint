@@ -301,14 +301,14 @@ export component SettingsDialog inherits Modal {
     HorizontalLayout {
         spacing: 8px;
         Text {
-            text: AppState.gh-signed-in ? "Signed in as " + AppState.gh-login + " (token in OS credential vault)" : "Not signed in";
+            text: AppState.gh-signed-in ? "Signed in as " + AppState.gh-login + (AppState.gh-accounts.length > 1 ? " (+" + (AppState.gh-accounts.length - 1) + " more, switch in the GitHub tab)" : "") + " · tokens in the OS credential vault" : "Not signed in";
             color: T.fg;
             vertical-alignment: center;
             overflow: elide;
             horizontal-stretch: 1;
         }
         if AppState.gh-signed-in: FlatButton {
-            text: "Sign out";
+            text: "Sign out " + AppState.gh-login;
             clicked => { AppState.gh-sign-out(); }
         }
         if !AppState.gh-signed-in: FlatButton {

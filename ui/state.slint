@@ -159,6 +159,11 @@ export global AppState {
     in-out property <string> device-code;
     in-out property <string> device-url;
     in-out property <bool> signing-in;
+    // Every signed-in account (active first), whether one is being added, and
+    // whether the open repository always uses the active one.
+    in-out property <[string]> gh-accounts;
+    in-out property <bool> gh-adding-account;
+    in-out property <bool> gh-account-pinned;
 
     // ---- chrome ----
     in-out property <int> tab;
@@ -232,6 +237,10 @@ export global AppState {
     callback gh-sign-in-device();
     callback gh-cancel-sign-in();
     callback gh-sign-out();
+    callback gh-switch-account(string);
+    callback gh-add-account();
+    callback gh-cancel-add-account();
+    callback gh-pin-account(bool);
     callback gh-refresh();
     callback gh-tab-changed(int);
     callback gh-filter(string);

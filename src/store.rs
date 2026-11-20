@@ -146,6 +146,16 @@ impl Store {
         Ok(())
     }
 
+    pub fn cache_remove(&self, key: &str) -> Result<()> {
+        self.conn.execute("DELETE FROM github_cache WHERE key = ?1", params![key])?;
+        Ok(())
+    }
+
+    pub fn remove_setting(&self, key: &str) -> Result<()> {
+        self.conn.execute("DELETE FROM app_settings WHERE key = ?1", params![key])?;
+        Ok(())
+    }
+
     pub fn cache_clear(&self) -> Result<()> {
         self.conn.execute("DELETE FROM github_cache", [])?;
         Ok(())
@@ -175,8 +185,14 @@ mod tests {
 
         s.cache_put("repos", "[]").unwrap();
         assert_eq!(s.cache_get("repos").unwrap().0, "[]");
+        s.cache_put("repos:a", "[1]").unwrap();
+        s.cache_remove("repos").unwrap();
+        assert!(s.cache_get("repos").is_none() && s.cache_get("repos:a").is_some());
         s.cache_clear().unwrap();
-        assert!(s.cache_get("repos").is_none());
+        assert!(s.cache_get("repos:a").is_none());
+        s.set("gh_account:/r", "me").unwrap();
+        s.remove_setting("gh_account:/r").unwrap();
+        assert_eq!(s.get("gh_account:/r"), None);
     }
 
     #[test]
