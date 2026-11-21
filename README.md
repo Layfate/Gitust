@@ -7,10 +7,7 @@ No Electron, no webview, no Node runtime: one small executable.</p>
 
 <p align="center"><a href="https://slint.dev"><img src="https://raw.githubusercontent.com/slint-ui/slint/master/logo/MadeWithSlint-logo-whitebg.png" alt="Made with Slint" height="36"></a></p>
 
-<p align="center">
-  <img src="docs/screenshots/changes.png" width="49%" alt="Changes view with a diff">
-  <img src="docs/screenshots/history.png" width="49%" alt="History view">
-</p>
+<p align="center"><img src="docs/screenshots/changes.png" width="100%" alt="Gitust's Changes view: a syntax-highlighted diff with changed words marked and four lines ticked for staging"></p>
 
 ## Why
 
