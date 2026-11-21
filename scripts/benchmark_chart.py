@@ -3,8 +3,9 @@
     python scripts/benchmark_chart.py
 
 One card per metric, each with its own scale (MB and ms never share an axis) and
-the headline ratio in large type. Bars grow in once when the image loads (CSS
-animation; renderers without animation show the final chart). Colors were
+the headline ratio in large type. Bars grow in, hold and reset on a 6 s loop
+(CSS animation, like a GIF; renderers without animation and readers who prefer
+reduced motion get the static final chart). Colors were
 checked with the dataviz palette validator against GitHub's light (#ffffff) and
 dark (#0d1117) page backgrounds; the SVG follows the reader's theme.
 """
@@ -63,10 +64,18 @@ out = [
   .name{font-size:15px;font-weight:600} .sub{font-size:12px}
   .ratio{font-size:38px;font-weight:800;letter-spacing:-1px} .word{font-size:15px;font-weight:600}
   .val{font-size:13px;font-weight:600} .small{font-size:12px} .legend{font-size:13px;font-weight:600}
-  .bar{transform-box:fill-box;transform-origin:left center;animation:grow .9s cubic-bezier(.2,.8,.2,1) backwards}
-  .fade{animation:fade .5s ease-out backwards}
-  @keyframes grow{from{transform:scaleX(0)}}
-  @keyframes fade{from{opacity:0}}
+  .bar{transform-box:fill-box;transform-origin:left center;animation:grow 6s infinite backwards}
+  .fade{animation:fade 6s infinite backwards}
+  @keyframes grow{
+    0%{transform:scaleX(0);animation-timing-function:cubic-bezier(.2,.8,.2,1)}
+    20%,86%{transform:scaleX(1);animation-timing-function:ease-in}
+    96%,100%{transform:scaleX(0)}
+  }
+  @keyframes fade{
+    0%,6%{opacity:0;transform:translateY(6px);animation-timing-function:ease-out}
+    20%,86%{opacity:1;transform:none;animation-timing-function:ease-in}
+    96%,100%{opacity:0}
+  }
   @media (prefers-reduced-motion: reduce){.bar,.fade{animation:none}}
 </style>""",
     f'<rect class="bg" width="{W}" height="{H}" rx="12"/>',
