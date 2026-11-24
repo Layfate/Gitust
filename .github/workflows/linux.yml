@@ -41,7 +41,7 @@ jobs:
       - name: Build tools, and the window system libraries the AppImage bundles
         run: |
           dnf -y -q install epel-release
-          dnf -y -q install git gcc make binutils patchelf jq findutils \
+          dnf -y -q install git gcc make binutils patchelf jq findutils file desktop-file-utils \
             libxcb libX11 libX11-xcb libXcursor libXi libxkbcommon libxkbcommon-x11 \
             libwayland-client libwayland-cursor
 
