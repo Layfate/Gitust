@@ -16,13 +16,15 @@
 
 use std::ffi::{CStr, CString, c_void};
 use std::os::unix::ffi::OsStrExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// `<session> <soname>` lines, dependencies first. The build script reads the same file.
 const LIBS: &str = include_str!("../assets/linux/appimage-libs.txt");
 
+/// Must run before any other thread starts (it may set an environment variable).
 pub fn load_fallback_libraries() {
     let Some(dir) = fallback_dir() else { return };
+    use_xkb_stand_in(&dir);
     let env = |k: &str| std::env::var_os(k).is_some_and(|v| !v.is_empty());
     let wayland = env("WAYLAND_DISPLAY") || env("WAYLAND_SOCKET");
     // No display variable at all: winit tries X11, so that's what to prepare.
@@ -55,6 +57,25 @@ pub fn load_fallback_libraries() {
         }
     }
     crate::log::info(&format!("using bundled libraries the system lacks: {}", bundled.join(", ")));
+}
+
+/// libxkbcommon won't create a context unless its data folder exists, even
+/// though X11 and Wayland both hand it the keymap ready-made; winit then
+/// panics. Desktops always have the folder (xkb-data / xkeyboard-config), bare
+/// systems don't, so the AppImage carries an empty stand-in for them.
+fn use_xkb_stand_in(fallback: &Path) {
+    const SYSTEM: &str = "/usr/share/X11/xkb";
+    if std::env::var_os("XKB_CONFIG_ROOT").is_some() || Path::new(SYSTEM).is_dir() {
+        return;
+    }
+    let Some(stand_in) = fallback.parent().and_then(Path::parent).map(|usr| usr.join("share/X11/xkb")) else {
+        return;
+    };
+    if stand_in.is_dir() {
+        // SAFETY: called first thing in main, before any other thread exists.
+        unsafe { std::env::set_var("XKB_CONFIG_ROOT", &stand_in) };
+        crate::log::info(&format!("no {SYSTEM} on this system; using the AppImage's empty stand-in"));
+    }
 }
 
 /// `usr/lib/fallback` next to `usr/bin/gitust`, when it exists.

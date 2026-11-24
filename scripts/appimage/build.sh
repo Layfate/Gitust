@@ -62,6 +62,10 @@ sed -e "s/@VERSION@/$version/" -e "s/@DATE@/$date/" assets/linux/io.github.Layfa
 cp assets/linux/gitust.desktop "$app/gitust.desktop"
 cp assets/gitust-512.png "$app/gitust.png"
 ln -s gitust.png "$app/.DirIcon"
+# libxkbcommon needs its data folder to exist, though X11 and Wayland send the
+# keymap themselves; src/linux.rs points it here on systems without one.
+mkdir -p "$app/usr/share/X11/xkb"
+echo "Empty on purpose: see use_xkb_stand_in in Gitust's src/linux.rs." > "$app/usr/share/X11/xkb/README"
 # The binary is the entry point, so /proc/self/exe is usr/bin/gitust and
 # src/linux.rs finds usr/lib/fallback next to it. No LD_LIBRARY_PATH: it
 # would leak into the git processes Gitust starts.
