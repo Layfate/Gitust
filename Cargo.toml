@@ -13,7 +13,9 @@ repository = "https://github.com/Layfate/Gitust"
 [package.metadata.deb]
 maintainer = "Layfate <343918192+Layfate@users.noreply.github.com>"
 section = "devel"
-depends = "$auto, git"
+# winit and fontique load the window system libraries with dlopen, so
+# "$auto" (which reads the binary's links) can't see them.
+depends = "$auto, git, libfontconfig1, libxkbcommon0, libxkbcommon-x11-0, libx11-xcb1, libxcursor1, libxi6"
 extended-description = "Gitust keeps the everyday Git flow (see what changed, stage files, hunks or lines, commit, branch, push) in a native window that starts fast and idles at about 10 MB of memory. GitHub is optional."
 assets = [
     ["target/release/gitust", "usr/bin/", "755"],
@@ -39,6 +41,14 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 slint = { version = "1.19.0", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-femtovg", "renderer-software", "accessibility"] }
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "sync", "process", "io-util", "macros", "time"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Slint already uses fontique; this only switches it to load fontconfig with
+# dlopen instead of linking it, so a system without fontconfig still starts
+# (with Slint's built-in font) instead of failing to load the binary.
+fontique = { version = "0.12.0", features = ["fontconfig-dlopen"] }
+# dlopen for the AppImage's bundled window system libraries (src/linux.rs).
+libc = "0.2.191"
 
 [build-dependencies]
 slint-build = "1.19.0"

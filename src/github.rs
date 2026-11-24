@@ -102,11 +102,24 @@ pub async fn gh_cli_token() -> Result<String> {
 
 // ---------- client ----------
 
-pub fn client(token: &str) -> Result<Octocrab> {
+/// Every GitHub client starts here. octocrab sets no timeouts, so on a network
+/// that drops packets (firewall, captive portal) a request could wait forever;
+/// these turn that into an error the UI shows like any other.
+fn builder() -> octocrab::OctocrabBuilder<
+    octocrab::NoSvc,
+    octocrab::DefaultOctocrabBuilderConfig,
+    octocrab::NoAuth,
+    octocrab::NotLayerReady,
+> {
+    use std::time::Duration;
     Octocrab::builder()
-        .personal_token(token.to_string())
-        .build()
-        .map_err(|e| anyhow!("Couldn't create GitHub client: {e}"))
+        .set_connect_timeout(Some(Duration::from_secs(10)))
+        .set_read_timeout(Some(Duration::from_secs(30)))
+        .set_write_timeout(Some(Duration::from_secs(30)))
+}
+
+pub fn client(token: &str) -> Result<Octocrab> {
+    builder().personal_token(token.to_string()).build().map_err(|e| anyhow!("Couldn't create GitHub client: {e}"))
 }
 
 fn explain(e: octocrab::Error) -> anyhow::Error {
@@ -263,7 +276,7 @@ struct ReleaseResp {
 /// The latest published release of Gitust: `(tag, page url)`. Anonymous
 /// request; nothing about the user is sent. `None` if there is no release yet.
 pub async fn latest_release() -> Result<Option<(String, String)>> {
-    let crab = Octocrab::builder().build().map_err(|e| anyhow!("Couldn't create GitHub client: {e}"))?;
+    let crab = builder().build().map_err(|e| anyhow!("Couldn't create GitHub client: {e}"))?;
     match get_json::<ReleaseResp>(&crab, "/repos/Layfate/Gitust/releases/latest").await {
         Ok(r) if !r.draft && !r.prerelease && r.html_url.starts_with("https://github.com/") => {
             Ok(Some((r.tag_name, r.html_url)))
@@ -481,7 +494,7 @@ pub struct DeviceLogin {
 
 impl DeviceLogin {
     pub async fn start(client_id: &str) -> Result<Self> {
-        let crab = Octocrab::builder()
+        let crab = builder()
             .base_uri("https://github.com")
             .map_err(|e| anyhow!("{e}"))?
             .add_header(http::header::ACCEPT, "application/json".to_string())

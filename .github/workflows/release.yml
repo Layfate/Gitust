@@ -53,55 +53,17 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: windows
+          name: dist-windows
           path: dist/*
 
-  # Linux and macOS packages are previews: they build and pass the tests in CI,
-  # but haven't been tried on real machines yet.
+  # Linux: AppImage, .deb and .tar.gz built against glibc 2.28, with the
+  # AppImage tested like the AppImage catalog does and in bare containers
+  # without network (see linux.yml). The publish job waits for those tests.
   linux:
-    runs-on: ubuntu-22.04 # older glibc, so the binary runs on more distributions
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+    uses: ./.github/workflows/linux.yml
 
-      - name: System libraries
-        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev
-
-      - name: Build
-        run: cargo build --release --locked
-
-      - name: Package (.tar.gz, .deb, AppImage)
-        run: |
-          set -euo pipefail
-          v=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
-          mkdir -p dist
-
-          t="Gitust-$v-linux-x86_64"
-          mkdir -p "$t"
-          cp target/release/gitust README.md LICENSE-MIT LICENSE-APACHE assets/linux/gitust.desktop "$t/"
-          cp assets/gitust-512.png "$t/gitust.png"
-          tar -czf "dist/$t.tar.gz" "$t"
-
-          cargo install cargo-deb --locked
-          cargo deb --no-build --output "dist/gitust_${v}_amd64.deb"
-
-          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-          chmod +x linuxdeploy-x86_64.AppImage
-          mkdir -p AppDir/usr/bin AppDir/usr/share/icons/hicolor/512x512/apps
-          cp target/release/gitust AppDir/usr/bin/
-          cp assets/gitust-512.png AppDir/usr/share/icons/hicolor/512x512/apps/gitust.png
-          LINUXDEPLOY_OUTPUT_VERSION="$v" ./linuxdeploy-x86_64.AppImage --appimage-extract-and-run \
-            --appdir AppDir --desktop-file assets/linux/gitust.desktop \
-            --icon-file AppDir/usr/share/icons/hicolor/512x512/apps/gitust.png --output appimage
-          mv Gitust-*.AppImage "dist/Gitust-$v-x86_64.AppImage"
-          ls -la dist
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: linux
-          path: dist/*
-
+  # The macOS package is a preview: it builds and passes the tests in CI, but
+  # hasn't been tried on a real machine yet.
   macos:
     runs-on: macos-latest
     steps:
@@ -139,15 +101,17 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: macos
+          name: dist-macos
           path: dist/*
 
   publish:
     needs: [windows, linux, macos]
     runs-on: ubuntu-latest
     steps:
+      # Only the packages (dist-*), not the AppImage test screenshots and logs.
       - uses: actions/download-artifact@v8
         with:
+          pattern: dist-*
           path: dist
           merge-multiple: true
 

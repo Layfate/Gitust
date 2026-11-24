@@ -1,0 +1,151 @@
+name: Linux packages
+
+# Builds the Linux packages (AppImage, .deb, .tar.gz) and tests the AppImage
+# twice: the way the AppImage catalog (appimage.github.io) does, and in bare
+# container images with nothing installed and no network. release.yml calls
+# this for tagged releases; on main it runs when something it depends on changes.
+on:
+  push:
+    branches: [main]
+    paths: &paths
+      - "src/**"
+      - "ui/**"
+      - "assets/**"
+      - "scripts/appimage/**"
+      - "build.rs"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/linux.yml"
+  pull_request:
+    paths: *paths
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # Repository variable; without it the browser sign-in button is hidden.
+  GITUST_GITHUB_CLIENT_ID: ${{ vars.GITUST_GITHUB_CLIENT_ID }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # Built against glibc 2.28, so it runs on Debian 10, Ubuntu 18.10, RHEL 8,
+    # openSUSE 15.1 and anything newer. AlmaLinux 8 is supported until 2029.
+    container: almalinux:8
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - name: Build tools, and the window system libraries the AppImage bundles
+        run: |
+          dnf -y -q install epel-release
+          dnf -y -q install git gcc make binutils patchelf jq findutils \
+            libxcb libX11 libX11-xcb libXcursor libXi libxkbcommon libxkbcommon-x11 \
+            libwayland-client libwayland-cursor
+
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --release --locked
+
+      - name: Version
+        id: v
+        run: echo "version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')" >> "$GITHUB_OUTPUT"
+
+      - name: AppImage
+        run: scripts/appimage/build.sh "${{ steps.v.outputs.version }}" dist
+
+      - name: .tar.gz
+        run: |
+          t="Gitust-${{ steps.v.outputs.version }}-linux-x86_64"
+          mkdir -p "$t"
+          cp target/release/gitust README.md LICENSE-MIT LICENSE-APACHE assets/linux/gitust.desktop "$t/"
+          cp assets/gitust-512.png "$t/gitust.png"
+          tar -czf "dist/$t.tar.gz" "$t"
+          ls -la dist
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist-linux
+          path: dist/*
+      # For the .deb job (cargo-deb works out dependencies with Debian's tools).
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux-binary
+          path: target/release/gitust
+
+  deb:
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: linux-binary
+          path: target/release
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Package
+        run: |
+          chmod +x target/release/gitust
+          cargo install cargo-deb --locked
+          mkdir -p dist
+          cargo deb --no-build --output "dist/gitust_${{ needs.build.outputs.version }}_amd64.deb"
+          dpkg-deb --info dist/*.deb
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist-linux-deb
+          path: dist/*
+
+  # The catalog's test runs on the oldest Ubuntu LTS still in standard support.
+  test-catalog:
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist-linux
+          path: dist
+      - name: Test like appimage.github.io
+        run: |
+          chmod +x dist/*.AppImage
+          scripts/appimage/test-catalog.sh dist/*.AppImage appimage-test
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: appimage-test-catalog
+          path: appimage-test/
+
+  test-clean:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # almalinux:8 has the oldest glibc the AppImage supports (2.28).
+        image: ["almalinux:8", "debian:12", "ubuntu:22.04", "ubuntu:24.04", "fedora:latest", "archlinux:latest"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist-linux
+          path: dist
+      - name: Host display
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq xvfb x11-utils imagemagick >/dev/null
+      - name: Run in a bare ${{ matrix.image }} with no network
+        run: |
+          chmod +x dist/*.AppImage
+          scripts/appimage/test-clean.sh dist/*.AppImage "${{ matrix.image }}" appimage-test
+      - name: Artifact name
+        if: always()
+        id: n
+        run: echo "name=appimage-test-$(echo '${{ matrix.image }}' | tr -c 'A-Za-z0-9\n' '-')" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ${{ steps.n.outputs.name }}
+          path: appimage-test/

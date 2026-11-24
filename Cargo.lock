@@ -1818,9 +1818,11 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "dirs",
+ "fontique",
  "git2",
  "http",
  "keyring",
+ "libc",
  "notify-debouncer-mini",
  "octocrab",
  "open",
