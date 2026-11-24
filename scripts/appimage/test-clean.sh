@@ -38,12 +38,21 @@ sleep 7
 import -window root "$out/$name.png" || true
 status=0
 wait "$app" || status=$?
-log="$home/.local/share/gitust/gitust.log"
+log="$home/.local/share/Gitust/gitust.log"
 cat "$out/$name-stdout.txt"
 cp "$log" "$out/$name-gitust.log" 2>/dev/null || true
 cat "$log" 2>/dev/null || true
 
-[ "$status" -eq 0 ] || { echo "error: Gitust exited with status $status" >&2; exit 1; }
+if [ "$status" -ne 0 ]; then
+  echo "error: Gitust exited with status $status" >&2
+  echo "-- which X libraries it found and loaded:"
+  docker run --rm --network none --user "$(id -u):$(id -g)" \
+    -v /tmp/.X11-unix:/tmp/.X11-unix -v "$appimage:/opt/Gitust.AppImage:ro" -v "$home:/home/test" \
+    -e DISPLAY=:99 -e HOME=/home/test -e APPIMAGE_EXTRACT_AND_RUN=1 -e GITUST_SMOKE_TEST=5 -e LD_DEBUG=libs \
+    "$image" /opt/Gitust.AppImage 2>&1 \
+    | grep -E 'find library=|trying file=|calling init:|error|cannot' | grep -iE 'x11|xcb|xau|error|cannot' | head -n 60 || true
+  exit 1
+fi
 grep -q 'window visible = true' "$out/$name-stdout.txt" || { echo "error: no visible window" >&2; exit 1; }
 if grep -q '\[PANIC\]' "$log"; then echo "error: Gitust panicked" >&2; exit 1; fi
 grep -q 'update check skipped' "$log" || { echo "error: no sign the offline update check was handled" >&2; exit 1; }

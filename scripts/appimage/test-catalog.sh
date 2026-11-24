@@ -81,7 +81,7 @@ mkdir -p "$HOME/.icewm"
 printf 'ShowTaskBar = 0\n' > "$HOME/.icewm/preferences"
 icewm >/dev/null 2>&1 &
 wm=$!
-data="$HOME/.local/share/gitust"
+data="$HOME/.local/share/Gitust"
 rm -rf "$data"
 cleanup() { kill "${app:-}" "$wm" "$xvfb" 2>/dev/null || true; }
 trap cleanup EXIT
@@ -98,8 +98,17 @@ sleep 2
 if ! kill -0 "$app" 2>/dev/null; then
   echo "error: Gitust exited instead of showing a window" >&2
   cat "$out/stdout.txt" "$data/gitust.log" 2>/dev/null || true
-  echo "-- again without --quiet, for firejail's own messages:"
-  timeout 20 firejail --noprofile --net=none --appimage "$appimage" 2>&1 | tail -n 40 || true
+  wait "$app" && echo "firejail exit status: 0" || echo "firejail exit status: $?"
+  echo "-- again with firejail --debug:"
+  timeout 20 firejail --debug --noprofile --net=none --appimage "$appimage" 2>&1 | tail -n 60 || true
+  echo "-- the extracted AppImage directly, no firejail:"
+  RUST_BACKTRACE=1 GITUST_SMOKE_TEST=5 timeout 30 "$tools/squashfs-root/AppRun" 2>&1 | tail -n 30 \
+    && echo "exit status: ${PIPESTATUS[0]}" || echo "exit status: ${PIPESTATUS[0]}"
+  echo "-- which X libraries it loads:"
+  LD_DEBUG=libs GITUST_SMOKE_TEST=5 timeout 30 "$tools/squashfs-root/AppRun" 2>&1 \
+    | grep -E 'calling init|error|cannot' | grep -iE 'x11|xcb|xkb|wayland|error|cannot' | head -n 40 || true
+  sudo dmesg | tail -n 15 || true
+  cat "$data/gitust.log" 2>/dev/null || true
   exit 1
 fi
 timeout 20 xwininfo -tree -root | grep '": ("' | sed 's/^ */  /'
