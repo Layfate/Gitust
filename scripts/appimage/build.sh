@@ -66,6 +66,12 @@ ln -s gitust.png "$app/.DirIcon"
 # keymap themselves; src/linux.rs points it here on systems without one.
 mkdir -p "$app/usr/share/X11/xkb"
 echo "Empty on purpose: see use_xkb_stand_in in Gitust's src/linux.rs." > "$app/usr/share/X11/xkb/README"
+# Slint's own fallback font (OFL), for systems with no fonts at all (src/linux.rs).
+slint_common=$(dirname "$(cargo metadata --format-version 1 --locked \
+  | jq -r '.packages[] | select(.name == "i-slint-common") | .manifest_path')")
+mkdir -p "$app/usr/share/fonts/gitust"
+cp "$slint_common/sharedfontique/Inter-VariableFont.ttf" "$slint_common/sharedfontique/Inter-VariableFont.ttf.license" \
+  "$app/usr/share/fonts/gitust/"
 # The binary is the entry point, so /proc/self/exe is usr/bin/gitust and
 # src/linux.rs finds usr/lib/fallback next to it. No LD_LIBRARY_PATH: it
 # would leak into the git processes Gitust starts.

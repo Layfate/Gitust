@@ -21,7 +21,7 @@ EXCLUDELIST=https://raw.githubusercontent.com/AppImage/AppImages/19e30b276ffedf4
 echo "== Test system"
 sudo apt-get update -qq
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
-  xvfb icewm xdotool x11-utils imagemagick tesseract-ocr tesseract-ocr-eng firejail \
+  xvfb icewm xdotool x11-utils imagemagick tesseract-ocr tesseract-ocr-eng \
   desktop-file-utils libfile-mimeinfo-perl appstream file binutils >/dev/null
 sudo DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq libxkbcommon-x11-0 || true
 if ldconfig -p | grep -q libxkbcommon-x11.so.0; then echo "error: libxkbcommon-x11 is still installed" >&2; exit 1; fi
@@ -49,6 +49,29 @@ if [ "$(printf '%s\n' "$required" "$baseline" | sort -V | tail -n 1)" != "$basel
   exit 1
 fi
 
+echo "== Firejail, installed the way the catalog's worker.sh does it"
+fj=$(mktemp -d)
+(
+  cd "$fj"
+  curl -fsSL --retry 3 -o alpine-firejail-git20230825.tar.gz \
+    https://github.com/AppImage/appimage.github.io/releases/download/deps/alpine-firejail-git20230825.tar.gz
+  musl=$(curl -fsSL --retry 3 https://dl-cdn.alpinelinux.org/alpine/v3.13/main/x86_64/ | grep -o 'musl-1[^"]*\.apk' | head -n 1)
+  curl -fsSL --retry 3 -o "$musl" "https://dl-cdn.alpinelinux.org/alpine/v3.13/main/x86_64/$musl"
+  mkdir -p firejail
+  sudo tar xf alpine-firejail-git20230825.tar.gz
+  sudo tar xf musl-*.apk -C ./firejail/ 2>/dev/null || true
+  sudo tar xf firejail-0*.apk -C ./firejail/ 2>/dev/null || true
+  sudo cp -Rf ./firejail/etc/* /etc/
+  sudo cp -Rf ./firejail/lib/* /lib/
+  sudo cp -Rf ./firejail/usr/* /usr/
+  sudo chown root:root /usr/bin/firejail
+  sudo chmod u+s /usr/bin/firejail
+)
+firejail --version | head -n 1
+sudo sysctl -q kernel.unprivileged_userns_clone=1 || true
+mkdir -p "$HOME/.local/share/appimagekit"
+touch "$HOME/.local/share/appimagekit/no_desktopintegration"
+
 echo "== Launch: firejail --net=none, no arguments"
 export DISPLAY=:99
 Xvfb :99 -screen 0 800x600x24 >/dev/null 2>&1 &
@@ -75,6 +98,8 @@ sleep 2
 if ! kill -0 "$app" 2>/dev/null; then
   echo "error: Gitust exited instead of showing a window" >&2
   cat "$out/stdout.txt" "$data/gitust.log" 2>/dev/null || true
+  echo "-- again without --quiet, for firejail's own messages:"
+  timeout 20 firejail --noprofile --net=none --appimage "$appimage" 2>&1 | tail -n 40 || true
   exit 1
 fi
 timeout 20 xwininfo -tree -root | grep '": ("' | sed 's/^ */  /'

@@ -24,7 +24,9 @@ const LIBS: &str = include_str!("../assets/linux/appimage-libs.txt");
 /// Must run before any other thread starts (it may set an environment variable).
 pub fn load_fallback_libraries() {
     let Some(dir) = fallback_dir() else { return };
-    use_xkb_stand_in(&dir);
+    let usr = dir.parent().and_then(Path::parent).unwrap_or(&dir).to_path_buf();
+    use_xkb_stand_in(&usr);
+    use_font_stand_in(&usr);
     let env = |k: &str| std::env::var_os(k).is_some_and(|v| !v.is_empty());
     let wayland = env("WAYLAND_DISPLAY") || env("WAYLAND_SOCKET");
     // No display variable at all: winit tries X11, so that's what to prepare.
@@ -63,19 +65,67 @@ pub fn load_fallback_libraries() {
 /// though X11 and Wayland both hand it the keymap ready-made; winit then
 /// panics. Desktops always have the folder (xkb-data / xkeyboard-config), bare
 /// systems don't, so the AppImage carries an empty stand-in for them.
-fn use_xkb_stand_in(fallback: &Path) {
+fn use_xkb_stand_in(usr: &Path) {
     const SYSTEM: &str = "/usr/share/X11/xkb";
     if std::env::var_os("XKB_CONFIG_ROOT").is_some() || Path::new(SYSTEM).is_dir() {
         return;
     }
-    let Some(stand_in) = fallback.parent().and_then(Path::parent).map(|usr| usr.join("share/X11/xkb")) else {
-        return;
-    };
+    let stand_in = usr.join("share/X11/xkb");
     if stand_in.is_dir() {
         // SAFETY: called first thing in main, before any other thread exists.
         unsafe { std::env::set_var("XKB_CONFIG_ROOT", &stand_in) };
         crate::log::info(&format!("no {SYSTEM} on this system; using the AppImage's empty stand-in"));
     }
+}
+
+/// Slint's software renderer needs at least one font and only embeds one on
+/// the web, so a system with no fonts (or no fontconfig to find them) would
+/// panic at the first text. Desktops always have fonts; for the rest, the
+/// AppImage carries Inter, the font Slint itself falls back to elsewhere.
+fn use_font_stand_in(usr: &Path) {
+    if std::env::var_os("SLINT_DEFAULT_FONT").is_some() || system_has_fonts() {
+        return;
+    }
+    let font = usr.join("share/fonts/gitust/Inter-VariableFont.ttf");
+    if font.is_file() {
+        // SAFETY: called first thing in main, before any other thread exists.
+        unsafe { std::env::set_var("SLINT_DEFAULT_FONT", &font) };
+        crate::log::info("no system fonts found; using the AppImage's built-in font");
+    }
+}
+
+/// Whether fontconfig is there and some scalable font is in a folder it reads.
+fn system_has_fonts() -> bool {
+    let Some(fontconfig) = open(c"libfontconfig.so.1") else { return false };
+    // SAFETY: the handle came from a successful dlopen just above.
+    unsafe { libc::dlclose(fontconfig) };
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let data_home =
+        std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).or_else(|| home.as_ref().map(|h| h.join(".local/share")));
+    [
+        Some(PathBuf::from("/usr/share/fonts")),
+        Some(PathBuf::from("/usr/local/share/fonts")),
+        data_home.map(|d| d.join("fonts")),
+        home.map(|h| h.join(".fonts")),
+    ]
+    .into_iter()
+    .flatten()
+    .any(|dir| has_font_file(&dir, 4))
+}
+
+/// Stops at the first .ttf/.otf/.ttc found, `depth` folders down at most.
+fn has_font_file(dir: &Path, depth: u32) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else { return false };
+    entries.flatten().any(|entry| {
+        let path = entry.path();
+        if path.is_dir() {
+            depth > 0 && has_font_file(&path, depth - 1)
+        } else {
+            path.extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| ["ttf", "otf", "ttc"].contains(&e.to_ascii_lowercase().as_str()))
+        }
+    })
 }
 
 /// `usr/lib/fallback` next to `usr/bin/gitust`, when it exists.
@@ -145,6 +195,19 @@ mod tests {
             assert!(["x11", "wayland", "any"].contains(&session), "{line}");
             assert!(soname.starts_with("lib") && soname.contains(".so."), "{line}");
         }
+    }
+
+    #[test]
+    fn finds_font_files_in_nested_folders() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!has_font_file(dir.path(), 4));
+        let deep = dir.path().join("truetype/dejavu");
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::write(deep.join("README"), "").unwrap();
+        assert!(!has_font_file(dir.path(), 4));
+        std::fs::write(deep.join("DejaVuSans.TTF"), "").unwrap();
+        assert!(has_font_file(dir.path(), 4));
+        assert!(!has_font_file(dir.path(), 1), "too deep for depth 1");
     }
 
     #[test]
