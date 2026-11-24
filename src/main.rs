@@ -31,10 +31,9 @@ fn main() -> anyhow::Result<()> {
         std::env::consts::ARCH
     ));
 
-    // Before anything opens a window: fill in window system libraries the
-    // system lacks from the AppImage's bundled copies.
+    // The AppImage's library fallbacks ran before main (see linux.rs).
     #[cfg(target_os = "linux")]
-    linux::load_fallback_libraries();
+    linux::log_startup_notes();
 
     // Two workers are plenty: git2 work runs on the blocking pool, network is async.
     let rt = tokio::runtime::Builder::new_multi_thread()

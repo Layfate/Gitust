@@ -1,17 +1,20 @@
 # Libraries the window system code opens with dlopen at run time, so ldd (and
 # tools built on it) can't see them. scripts/appimage/build.sh bundles each one
 # plus its dependencies in the AppImage's usr/lib/fallback, and src/linux.rs
-# loads a bundled copy only when the system has none.
+# loads bundled copies only for what the system lacks.
 #
-# One "<session> <soname>" per line, dependencies before what needs them.
+# One "<session> <soname> [set]" per line, dependencies before what needs them.
 # <session>: x11 (DISPLAY is set), wayland (WAYLAND_DISPLAY is set) or any.
+# [set]: libraries built together that reach into each other's internals; if
+# the system lacks one of them, all of them come from the bundle. (A bundled
+# libxkbcommon-x11 0.9 on top of the system's libxkbcommon 1.4 segfaults.)
 
 x11 libxcb.so.1
-x11 libX11.so.6
-x11 libX11-xcb.so.1
+x11 libX11.so.6 xlib
+x11 libX11-xcb.so.1 xlib
 x11 libXcursor.so.1
 x11 libXi.so.6
-any libxkbcommon.so.0
-x11 libxkbcommon-x11.so.0
-wayland libwayland-client.so.0
-wayland libwayland-cursor.so.0
+any libxkbcommon.so.0 xkb
+x11 libxkbcommon-x11.so.0 xkb
+wayland libwayland-client.so.0 wayland
+wayland libwayland-cursor.so.0 wayland

@@ -127,7 +127,7 @@ echo "== Gitust's log"
 cp "$data/gitust.log" "$out/gitust.log"
 cat "$out/gitust.log"
 if grep -q '\[PANIC\]' "$out/gitust.log"; then echo "error: Gitust panicked" >&2; exit 1; fi
-grep -q 'using bundled libraries the system lacks: .*libxkbcommon-x11.so.0' "$out/gitust.log" \
+grep -q 'using bundled libraries: libxkbcommon.so.0, libxkbcommon-x11.so.0' "$out/gitust.log" \
   || { echo "error: the bundled libxkbcommon-x11 wasn't used" >&2; exit 1; }
 grep -q 'update check skipped' "$out/gitust.log" \
   || { echo "error: no sign the offline update check was handled" >&2; exit 1; }
