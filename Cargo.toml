@@ -46,7 +46,7 @@ tokio = { version = "1.54.1", features = ["rt-multi-thread", "sync", "process", 
 # Slint already uses fontique; this only switches it to load fontconfig with
 # dlopen instead of linking it, so a system without fontconfig still starts
 # (with Slint's built-in font) instead of failing to load the binary.
-fontique = { version = "0.12.0", features = ["fontconfig-dlopen"] }
+fontique = { version = "0.13.0", features = ["fontconfig-dlopen"] }
 # dlopen for the AppImage's bundled window system libraries (src/linux.rs).
 libc = "0.2.191"
 
